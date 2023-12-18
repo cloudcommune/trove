@@ -77,3 +77,15 @@ class Replication(Strategy):
     def repl_backup_extra_opts(self):
         """Extra options to be passed to the backup agent"""
         return None
+
+    def get_sync_info(self, service, info_type):
+        """If there are configurations need sync to other replica when
+        attach/detatch replica. info_type value is attach or detach
+        """
+        pass
+
+    def sync_from_master_info(self, service, info_type, info):
+        """Other replications sync master's configurations to itself.
+        info_type value is attach or detach, info is the configurations.
+        """
+        pass

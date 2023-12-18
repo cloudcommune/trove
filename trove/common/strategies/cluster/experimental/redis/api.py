@@ -194,6 +194,19 @@ class RedisCluster(models.Cluster):
         finally:
             cluster_info.update(task_status=ClusterTasks.NONE)
 
+    def enable_command(self, command):
+        LOG.debug("Enable command %s for %s.", command, self.id)
+        version = self.API_BASE_VERSION
+        return self._call("enable_command", self.agent_high_timeout,
+                          version=version, command=command)
+
+    def disable_command(self, command, new_command=None):
+        LOG.debug("Disable command %s for %s.", command, self.id)
+        version = self.API_BASE_VERSION
+        return self._call("disable_command", self.agent_high_timeout,
+                          version=version, command=command,
+                          new_command=new_command)
+
 
 class RedisClusterView(ClusterView):
 

@@ -151,22 +151,27 @@ def cinder_client(context, region_name=None):
 
 
 def swift_client(context, region_name=None):
-    if CONF.swift_url:
-        # swift_url has a different format so doesn't need to be normalized
-        url = '%(swift_url)s%(tenant)s' % {'swift_url': CONF.swift_url,
-                                           'tenant': context.project_id}
-    else:
-        region = region_name or CONF.service_credentials.region_name
-        url = get_endpoint(context.service_catalog,
-                           service_type=CONF.swift_service_type,
-                           endpoint_region=region,
-                           endpoint_type=CONF.swift_endpoint_type)
+    if CONF.storage_strategy == 'SwiftStorage':
+        if CONF.swift_url:
+            # swift_url has a different format so doesn't need to be normalized
+            url = '%(swift_url)s%(tenant)s' % {'swift_url': CONF.swift_url,
+                                               'tenant': context.project_id}
+        else:
+            region = region_name or CONF.service_credentials.region_name
+            url = get_endpoint(context.service_catalog,
+                               service_type=CONF.swift_service_type,
+                               endpoint_region=region,
+                               endpoint_type=CONF.swift_endpoint_type)
 
-    client = Connection(preauthurl=url,
-                        preauthtoken=context.auth_token,
-                        tenant_name=context.project_id,
-                        snet=CONF.backup_use_snet,
-                        insecure=CONF.swift_api_insecure)
+        client = Connection(preauthurl=url,
+                            preauthtoken=context.auth_token,
+                            tenant_name=context.project_id,
+                            snet=CONF.backup_use_snet,
+                            insecure=CONF.swift_api_insecure)
+    elif CONF.storage_strategy == 'CephStorage':
+        client = Connection(user=CONF.ceph_user,
+                            key=CONF.ceph_key,
+                            authurl=CONF.swift_url)
     return client
 
 

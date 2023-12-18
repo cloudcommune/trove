@@ -310,6 +310,10 @@ common_opts = [
                help='Namespace to load the default storage strategy from.'),
     cfg.StrOpt('backup_swift_container', default='database_backups',
                help='Swift container to put backups in.'),
+    cfg.StrOpt('ceph_user', default='',
+               help='user of ceph for swift ceph storage strategy.'),
+    cfg.StrOpt('ceph_key', default='',
+               help='key of ceph user for swift ceph storage strategy.'),
     cfg.BoolOpt('backup_use_gzip_compression', default=True,
                 help='Compress backups using gzip.'),
     cfg.BoolOpt('backup_use_openssl_encryption', default=True,
@@ -464,6 +468,9 @@ common_opts = [
                help='Key (OpenSSL aes_cbc) to encrypt instance keys in DB.'),
     cfg.StrOpt('instance_rpc_encr_key',
                help='Key (OpenSSL aes_cbc) for instance RPC encryption.'),
+    cfg.IntOpt('instance_update_custom_interval', default=30,
+               help='The interval (in seconds) which custom periodic tasks'
+                    'are run.'),
 ]
 
 

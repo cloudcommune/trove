@@ -91,8 +91,8 @@ class Limits(object):
 
     def _get_limits_as_dict(self, limits):
         d = {}
-        for limit in limits:
-            d[l.verb] = limit
+        for l in limits:
+            d[l.verb] = l
         return d
 
     @test

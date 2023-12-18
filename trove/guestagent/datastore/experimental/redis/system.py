@@ -30,6 +30,7 @@ REDIS_PORT = '6379'
 REDIS_INIT = '/etc/init/redis-server.conf'
 REDIS_PACKAGE = ''
 SERVICE_CANDIDATES = ['redis-server', 'redis']
+SENTINEL_CONFIG = '/etc/redis-sentinel.conf'
 
 OS = get_os()
 if OS is 'redhat':

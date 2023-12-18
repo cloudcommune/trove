@@ -128,7 +128,8 @@ nics = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "net-id": uuid
+            "net-id": uuid,
+            "port-id": uuid,
         }
     }
 }

@@ -1,0 +1,15 @@
+#
+# Manager by trove-guestagent
+#
+daemonize no
+port 26379
+pidfile /var/run/redis-sentinel.pid
+logfile /var/log/redis/sentinel.log
+dir /var/lib/redis
+sentinel monitor mymaster 127.0.0.1 6379 1
+sentinel down-after-milliseconds mymaster 5000
+sentinel parallel-syncs mymaster 1
+sentinel failover-timeout mymaster 60000
+sentinel deny-scripts-reconfig no
+sentinel notification-script mymaster /opt/sentinel-scripts/notify.sh
+sentinel client-reconfig-script mymaster /opt/sentinel-scripts/reconfig.sh

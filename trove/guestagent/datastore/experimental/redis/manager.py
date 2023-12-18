@@ -14,6 +14,7 @@
 #    under the License.
 
 import os
+import time
 
 from oslo_log import log as logging
 
@@ -99,7 +100,7 @@ class Manager(manager.Manager):
                                + "cluster-enabled yes\n"
                                + "cluster-config-file cluster.conf\n")
         self._app.configuration_manager.save_configuration(config_contents)
-        self._app.apply_initial_guestagent_configuration()
+        self._app.apply_initial_guestagent_configuration(overrides)
         if backup_info:
             persistence_dir = self._app.get_working_dir()
             self._perform_restore(backup_info, context, persistence_dir,
@@ -110,6 +111,20 @@ class Manager(manager.Manager):
             self._app.restart()
         if snapshot:
             self.attach_replica(context, snapshot, snapshot['config'])
+
+        # config haproxy redis-sentienl
+        master_info = {'sentinel_enabled': False}
+        if overrides:
+            if 'vip' in overrides.keys():
+                master_info['sentinel_enabled'] = True
+                if snapshot and 'master' in snapshot.keys():
+                    master_info.update(snapshot['master'])
+                else:
+                    master_info['host'] = self._app._redis_host_ip(
+                        device='eth0',
+                        vip=overrides['vip']
+                    )
+        self._app.upload_redis_sentinel_config(**master_info)
 
     def pre_upgrade(self, context):
         mount_point = self._app.get_working_dir()
@@ -187,12 +202,19 @@ class Manager(manager.Manager):
 
     def update_overrides(self, context, overrides, remove=False):
         LOG.debug("Updating overrides.")
+        if 'vip' in overrides:
+            kwargs = {'vip': overrides['vip']}
+            self._app.upload_redis_sentinel_config(**kwargs)
+            del[overrides['vip']]
         if remove:
             self._app.remove_overrides()
         else:
             self._app.update_overrides(context, overrides, remove)
 
     def apply_overrides(self, context, overrides):
+        if 'vip' in overrides:
+            LOG.debug("Remove vip from apply overrides.")
+            del[overrides['vip']]
         LOG.debug("Applying overrides.")
         self._app.apply_overrides(self._app.admin, overrides)
 
@@ -344,3 +366,36 @@ class Manager(manager.Manager):
     def get_root_password(self, context):
         LOG.debug("Getting auth password.")
         return self._app.get_auth_password()
+
+    def get_renamed_commands(self, context):
+        LOG.debug("Get renamed commands.")
+        return self._app.get_renamed_commands()
+
+    def rename_commands(self, context, commands):
+        LOG.debug("Rename commands.")
+        return self._app.rename_commands(commands)
+
+    def get_ha(self, context):
+        LOG.debug("Get HA configuration")
+        return self._app.get_ha()
+
+    def set_ha(self, context, ha_config):
+        LOG.debug("Set HA configuration.")
+        self._app.set_ha(ha_config)
+
+    def delete_ha(self, context):
+        LOG.debug("Delete HA configuration.")
+        self._app.delete_ha()
+
+    def get_sync_info(self, context, info_type):
+        LOG.debug("Get sync information.")
+        return self.replication.get_sync_info(self._app, info_type)
+
+    def sync_from_master_info(self, context, info_type, info):
+        LOG.debug("Sync from master information.")
+        self.replication.sync_from_master_info(self._app, info_type, info)
+
+    def post_detach_replica(self, context):
+        LOG.debug("Post detach replica")
+        time.sleep(10)
+        self._app.start_db()

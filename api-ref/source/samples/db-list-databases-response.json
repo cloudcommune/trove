@@ -1,18 +1,23 @@
 {
     "databases": [
         {
+            "character_set": "utf8",
             "name": "anotherdb"
         },
         {
+            "character_set": "utf8",
             "name": "nextround"
         },
         {
+            "character_set": "utf8",
             "name": "oneMoreDB"
         },
         {
+            "character_set": "utf8",
             "name": "sampledb"
         },
         {
+            "character_set": "utf8",
             "name": "testingdb"
         }
     ]

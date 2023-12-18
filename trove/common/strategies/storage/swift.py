@@ -44,10 +44,11 @@ class SwiftDownloadIntegrityError(Exception):
 class StreamReader(object):
     """Wrap the stream from the backup process and chunk it into segements."""
 
-    def __init__(self, stream, filename, max_file_size=MAX_FILE_SIZE):
+    def __init__(self, stream, filename, container,
+                 max_file_size=MAX_FILE_SIZE):
         self.stream = stream
         self.filename = filename
-        self.container = BACKUP_CONTAINER
+        self.container = container
         self.max_file_size = max_file_size
         self.segment_length = 0
         self.process = None
@@ -80,7 +81,7 @@ class StreamReader(object):
             self.end_of_segment = False
 
         # Upload to a new file if we are starting or too large
-        if self.segment_length > (self.max_file_size - chunk_size):
+        if self.segment_length > (self.max_file_size - int(chunk_size)):
             self.file_number += 1
             self.end_of_segment = True
             return ''

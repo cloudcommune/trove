@@ -10,21 +10,18 @@ Installing API behind mod_wsgi
 
 #. Install the Apache Service::
 
-    RHEL7/CentOS7:
-      sudo yum install httpd mod_wsgi
+    Fedora 21/RHEL7/CentOS7:
+      sudo yum install httpd
 
-    RHEL8/CentOS8:
-      sudo dnf install httpd python3-mod_wsgi
-
-    Fedora:
-      sudo dnf install httpd mod_wsgi
+    Fedora 22 (or higher):
+      sudo dnf install httpd
 
     Debian/Ubuntu:
-      sudo apt-get install apache2 libapache2-mod-wsgi-py3
+      apt-get install apache2
 
 #. Copy ``etc/apache2/trove`` under the apache sites::
 
-    Fedora/RHEL/CentOS:
+    Fedora/RHEL7/CentOS7:
       sudo cp etc/apache2/trove /etc/httpd/conf.d/trove-api.conf
 
     Debian/Ubuntu:
@@ -48,5 +45,5 @@ Installing API behind mod_wsgi
       sudo systemctl reload httpd
 
     Debian/Ubuntu:
-      sudo a2ensite trove-api
+      sudo a2ensite trove
       sudo service apache2 reload

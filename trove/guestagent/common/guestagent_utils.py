@@ -140,3 +140,23 @@ def serialize_list(li, limit=None, marker=None, include_marker=False):
     page, next_name = paginate_list(li, limit=limit, marker=marker,
                                     include_marker=include_marker)
     return [item.serialize() for item in page], next_name
+
+
+def get_value_from_properties_dict(config, key, subkey):
+    for i in range(len(config.get(key, []))):
+        subconfig = config[key][i]
+        if isinstance(subconfig, list) and len(subconfig) >= 1:
+            if subkey == subconfig[0]:
+                return subconfig[1:]
+    return []
+
+
+def set_value_from_properties_dict(config, key, subkey, values):
+    for i in range(len(config.get(key, []))):
+        subconfig = config[key][i]
+        if isinstance(subconfig, list) and len(subconfig) >= 1:
+            if subkey == subconfig[0]:
+                config[key][i] = [subconfig[0]] + list(values)
+                break
+    else:
+        config.setdefault(key, []).append([subkey] + list(values))

@@ -46,17 +46,18 @@ class Manager(periodic_task.PeriodicTasks):
         self.admin_context = TroveContext(
             user=CONF.service_credentials.username,
             tenant=CONF.service_credentials.project_id,
+            auth_token=None,
             user_domain_name=CONF.service_credentials.user_domain_name)
         if CONF.exists_notification_transformer:
             self.exists_transformer = importutils.import_object(
                 CONF.exists_notification_transformer,
                 context=self.admin_context)
 
-    def resize_volume(self, context, instance_id, new_size):
+    def resize_volume(self, context, instance_id, new_size, qos_specs=None):
         with EndNotification(context):
             instance_tasks = models.BuiltInstanceTasks.load(context,
                                                             instance_id)
-            instance_tasks.resize_volume(new_size)
+            instance_tasks.resize_volume(new_size, qos_specs=qos_specs)
 
     def resize_flavor(self, context, instance_id, old_flavor, new_flavor):
         with EndNotification(context):
@@ -82,6 +83,15 @@ class Manager(periodic_task.PeriodicTasks):
             master_id = slave.slave_of_id
             master = models.BuiltInstanceTasks.load(context, master_id)
             slave.detach_replica(master)
+            sync_info = master.guest.get_sync_info(info_type='detach')
+            for other_slave in master.slaves:
+                LOG.debug("sync detatch info from master %s to %s",
+                          master_id, other_slave.id)
+                other_slave_instance = FreshInstanceTasks.load(context,
+                                                               other_slave.id)
+                other_slave_instance.guest.sync_from_master_info(
+                    info_type='detach', info=sync_info)
+            slave.guest.post_detach_replica()
 
     def _set_task_status(self, instances, status):
         for instance in instances:
@@ -126,6 +136,7 @@ class Manager(periodic_task.PeriodicTasks):
             master_candidate.wait_for_txn(latest_txn_id)
             master_candidate.detach_replica(old_master, for_failover=True)
             master_candidate.enable_as_master()
+            old_master.attach_replica(master_candidate)
             master_candidate.attach_public_ips(master_ips)
             master_candidate.make_read_only(False)
 
@@ -158,7 +169,6 @@ class Manager(periodic_task.PeriodicTasks):
 
             # dealing with the old master after all the other replicas
             # has been migrated.
-            old_master.attach_replica(master_candidate)
             old_master.attach_public_ips(slave_ips)
             try:
                 old_master.demote_replication_master()
@@ -314,7 +324,7 @@ class Manager(periodic_task.PeriodicTasks):
                                   datastore_manager, packages, volume_size,
                                   availability_zone, root_password, nics,
                                   overrides, slave_of_id, backup_id,
-                                  volume_type, modules):
+                                  volume_type, modules, qos_specs=None):
 
         if type(instance_id) in [list]:
             ids = instance_id
@@ -353,7 +363,7 @@ class Manager(periodic_task.PeriodicTasks):
                         packages, volume_size, replica_backup_id,
                         availability_zone, root_passwords[replica_index],
                         nics, overrides, None, snapshot, volume_type,
-                        modules, scheduler_hints)
+                        modules, scheduler_hints, qos_specs=qos_specs)
 
                     replicas.append(instance_tasks)
                 except Exception:
@@ -366,7 +376,14 @@ class Manager(periodic_task.PeriodicTasks):
 
             for replica in replicas:
                 replica.wait_for_instance(CONF.restore_usage_timeout, flavor)
-
+            master = FreshInstanceTasks.load(context, slave_of_id)
+            sync_info = master.guest.get_sync_info(info_type='attach')
+            for slave in master.slaves:
+                LOG.debug("sync attach info from master %s to %s",
+                          slave_of_id, slave.id)
+                slave_instance = FreshInstanceTasks.load(context, slave.id)
+                slave_instance.guest.sync_from_master_info(info_type='attach',
+                                                           info=sync_info)
         finally:
             if replica_backup_created:
                 Backup.delete(context, replica_backup_id)
@@ -376,7 +393,7 @@ class Manager(periodic_task.PeriodicTasks):
                          packages, volume_size, backup_id, availability_zone,
                          root_password, nics, overrides, slave_of_id,
                          cluster_config, volume_type, modules, locality,
-                         access=None):
+                         access=None, qos_specs=None):
         if slave_of_id:
             self._create_replication_slave(context, instance_id, name,
                                            flavor, image_id, databases, users,
@@ -384,7 +401,8 @@ class Manager(periodic_task.PeriodicTasks):
                                            volume_size,
                                            availability_zone, root_password,
                                            nics, overrides, slave_of_id,
-                                           backup_id, volume_type, modules)
+                                           backup_id, volume_type, modules,
+                                           qos_specs=qos_specs)
         else:
             if type(instance_id) in [list]:
                 raise AttributeError(_(
@@ -404,7 +422,8 @@ class Manager(periodic_task.PeriodicTasks):
                 availability_zone, root_password,
                 nics, overrides, cluster_config,
                 None, volume_type, modules,
-                scheduler_hints, access=access
+                scheduler_hints, access=access,
+                qos_specs=qos_specs
             )
 
             timeout = (CONF.restore_usage_timeout if backup_id
@@ -416,7 +435,7 @@ class Manager(periodic_task.PeriodicTasks):
                         packages, volume_size, backup_id, availability_zone,
                         root_password, nics, overrides, slave_of_id,
                         cluster_config, volume_type, modules, locality,
-                        access=None):
+                        access=None, qos_specs=None):
         with EndNotification(context,
                              instance_id=(instance_id[0]
                                           if isinstance(instance_id, list)
@@ -427,7 +446,7 @@ class Manager(periodic_task.PeriodicTasks):
                                   backup_id, availability_zone,
                                   root_password, nics, overrides, slave_of_id,
                                   cluster_config, volume_type, modules,
-                                  locality, access=access)
+                                  locality, access=access, qos_specs=qos_specs)
 
     def upgrade(self, context, instance_id, datastore_version_id):
         instance_tasks = models.BuiltInstanceTasks.load(context, instance_id)

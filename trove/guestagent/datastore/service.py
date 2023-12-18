@@ -141,6 +141,9 @@ class BaseDbStatus(object):
     def _get_actual_db_status(self):
         raise NotImplementedError()
 
+    def _get_actual_db_custom_status(self):
+        pass
+
     @property
     def is_installed(self):
         """
@@ -184,6 +187,20 @@ class BaseDbStatus(object):
             LOG.debug("Determining status of DB server.")
             status = self._get_actual_db_status()
             self.set_status(status)
+        else:
+            LOG.info("DB server is not installed or is in restart mode, so "
+                     "for now we'll skip determining the status of DB on "
+                     "this instance.")
+
+    def update_custom(self):
+        """Find and report status of DB status on this machine.
+        The database is updated and the status is also returned.
+        """
+        if self.is_installed and not self._is_restarting:
+            LOG.debug("Determining status of DB server.")
+            status = self._get_actual_db_custom_status()
+            if status['is_notify']:
+                self.set_custom_status(status['role'])
         else:
             LOG.info("DB server is not installed or is in restart mode, so "
                      "for now we'll skip determining the status of DB on "
@@ -385,3 +402,9 @@ class BaseDbStatus(object):
         LOG.debug("Casting report_root message to conductor.")
         conductor_api.API(context).report_root(CONF.guest_id)
         LOG.debug("Successfully cast report_root.")
+
+    def promote_to_master_in_db(selfs):
+        LOG.debug("Promote to master.")
+        context = trove_context.TroveContext()
+        conductor_api.API(context).promote_replica_to_master_in_db(
+            CONF.guest_id)

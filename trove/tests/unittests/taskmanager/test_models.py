@@ -334,9 +334,8 @@ class FreshInstanceTasksTest(BaseFreshInstanceTasksTest):
     @patch.object(taskmanager_models.FreshInstanceTasks, '_build_volume_info')
     @patch.object(taskmanager_models.FreshInstanceTasks, '_guest_prepare')
     @patch.object(template, 'SingleInstanceConfigTemplate')
-    @patch('trove.taskmanager.models.FreshInstanceTasks._create_port')
+    # @patch('trove.taskmanager.models.FreshInstanceTasks._create_port')
     def test_create_instance(self,
-                             mock_create_port,
                              mock_single_instance_template,
                              mock_guest_prepare,
                              mock_build_volume_info,
@@ -354,7 +353,6 @@ class FreshInstanceTasksTest(BaseFreshInstanceTasksTest):
             config_content)
         overrides = Mock()
         mock_create_secgroup.return_value = 'fake_security_group_id'
-        mock_create_port.return_value = 'fake-port-id'
 
         self.freshinstancetasks.create_instance(
             mock_flavor, 'mysql-image-id', None,
@@ -366,15 +364,10 @@ class FreshInstanceTasksTest(BaseFreshInstanceTasksTest):
         )
 
         mock_create_secgroup.assert_called_with('mysql', [])
-        mock_create_port.assert_called_once_with(
-            'fake-net-id',
-            ['fake_security_group_id'],
-            is_mgmt=False,
-            is_public=False
-        )
         mock_build_volume_info.assert_called_with(
             'mysql', volume_size=2,
-            volume_type='volume_type'
+            volume_type='volume_type',
+            availability_zone=None
         )
         mock_guest_prepare.assert_called_with(
             768, mock_build_volume_info(), 'mysql-server', None, None, None,
@@ -383,7 +376,7 @@ class FreshInstanceTasksTest(BaseFreshInstanceTasksTest):
         mock_create_server.assert_called_with(
             8, 'mysql-image-id', 'mysql',
             mock_build_volume_info()['block_device'], None,
-            [{'port-id': 'fake-port-id'}],
+            [{'net-id': 'fake-net-id'}],
             mock_get_injected_files(),
             {'group': 'sg-id'}
         )
@@ -436,7 +429,8 @@ class FreshInstanceTasksTest(BaseFreshInstanceTasksTest):
 
         mock_build_volume_info.assert_called_with(
             'mysql', volume_size=2,
-            volume_type='volume_type'
+            volume_type='volume_type',
+            availability_zone=None
         )
         mock_guest_prepare.assert_called_with(
             768, mock_build_volume_info(), 'mysql-server', None, None, None,
@@ -445,19 +439,11 @@ class FreshInstanceTasksTest(BaseFreshInstanceTasksTest):
             8, 'mysql-image-id', 'mysql',
             mock_build_volume_info()['block_device'], None,
             [
-                {'port-id': 'fake-user-port-id'},
+                {'net-id': 'fake-net-uuid'},
+                {'net-id': 'fake-mgmt-uuid'},
                 {'port-id': 'fake-mgmt-port-id'}
             ],
             mock_get_injected_files(), {'group': 'sg-id'}
-        )
-        create_floatingip_param = {
-            "floatingip": {
-                'floating_network_id': 'fake-public-net-id',
-                'port_id': 'fake-user-port-id',
-            }
-        }
-        mock_client.create_floatingip.assert_called_once_with(
-            create_floatingip_param
         )
 
     @patch.object(BaseInstance, 'update_db')

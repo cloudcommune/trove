@@ -106,14 +106,19 @@ class API(object):
         except exception.ModelNotFoundError as e:
             LOG.error(e.message)
 
-    def resize_volume(self, new_size, instance_id):
+    def resize_volume(self, new_size, instance_id, qos_specs=None):
         LOG.debug("Making async call to resize volume for instance: %s",
                   instance_id)
         version = self.API_BASE_VERSION
 
+        LOG.debug("resize %s volume with qos_specs: %s", instance_id, qos_specs)
+        kwargs = {}
+        if qos_specs:
+            kwargs = {'qos_specs': qos_specs}
         self._cast("resize_volume", version=version,
                    new_size=new_size,
-                   instance_id=instance_id)
+                   instance_id=instance_id,
+                   **kwargs)
 
     def resize_flavor(self, instance_id, old_flavor, new_flavor):
         LOG.debug("Making async call to resize flavor for instance: %s",
@@ -193,10 +198,14 @@ class API(object):
                         availability_zone=None, root_password=None,
                         nics=None, overrides=None, slave_of_id=None,
                         cluster_config=None, volume_type=None,
-                        modules=None, locality=None, access=None):
+                        modules=None, locality=None, access=None,
+                        qos_specs=None):
 
         LOG.debug("Making async call to create instance %s ", instance_id)
         version = self.API_BASE_VERSION
+        kw = {}
+        if qos_specs:
+            kw = {'qos_specs': qos_specs}
         self._cast("create_instance", version=version,
                    instance_id=instance_id, name=name,
                    flavor=self._transform_obj(flavor),
@@ -214,7 +223,7 @@ class API(object):
                    slave_of_id=slave_of_id,
                    cluster_config=cluster_config,
                    volume_type=volume_type,
-                   modules=modules, locality=locality, access=access)
+                   modules=modules, locality=locality, access=access, **kw)
 
     def create_cluster(self, cluster_id):
         LOG.debug("Making async call to create cluster %s ", cluster_id)

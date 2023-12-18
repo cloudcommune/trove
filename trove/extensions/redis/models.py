@@ -26,3 +26,23 @@ class RedisRoot(Root):
         password = create_guest_client(context,
                                        instance_id).get_root_password()
         return password
+
+
+class RedisGuestAgent(object):
+
+    @classmethod
+    def get_renamed_commands(cls, context, instance_id):
+        load_and_verify(context, instance_id)
+        return dict(create_guest_client(context,
+                                        instance_id).get_renamed_commands())
+
+    @classmethod
+    def rename_commands(cls, context, instance_id, commands,
+                        cluster_instances_list=[]):
+        commands = [[k, v] for k, v in commands.items()]
+        load_and_verify(context, instance_id)
+        create_guest_client(context, instance_id).rename_commands(
+            commands)
+        for instance in cluster_instances_list:
+            create_guest_client(context, instance).rename_commands(
+                commands)

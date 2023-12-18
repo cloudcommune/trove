@@ -131,10 +131,6 @@ class ConfigurationManager(object):
             # Serialize a dict of options for writing.
             self.save_configuration(self._codec.serialize(options))
         else:
-            self._override_strategy.remove(self.USER_GROUP)
-            self._override_strategy.remove(self.SYSTEM_PRE_USER_GROUP)
-            self._override_strategy.remove(self.SYSTEM_POST_USER_GROUP)
-
             operating_system.write_file(
                 self._base_config_path, options, as_root=self._requires_root)
             operating_system.chown(

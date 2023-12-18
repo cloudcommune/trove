@@ -148,7 +148,7 @@ class RedisGuestAgentManagerTest(DatastoreManagerTest):
         VolumeDevice.format.assert_any_call()
         install_if_needed.assert_any_call(self.packages)
         save_configuration_mock.assert_any_call(None)
-        apply_initial_guestagent_configuration.assert_called_once_with()
+        apply_initial_guestagent_configuration.assert_called_once_with(None)
         chown_mock.assert_any_call(mount_point, 'redis', 'redis', as_root=True)
         if backup_info:
             backup.restore.assert_called_once_with(self.context,
@@ -376,3 +376,21 @@ class RedisGuestAgentManagerTest(DatastoreManagerTest):
         result = self.manager.get_root_password(self.context)
         self.assertTrue(get_auth_password_mock.called)
         self.assertEqual('password', result)
+
+    @patch.object(redis_service.RedisApp, 'get_renamed_commands')
+    def test_get_renamed_commands(self, get_renamed_commands):
+        renamed_commands = [
+            ["shutdown", "renamed_shutdown"],
+            ["eval", "renamed_eval"]]
+        get_renamed_commands.return_value = renamed_commands
+        result = self.manager.get_renamed_commands(self.context)
+        self.assertTrue(get_renamed_commands.called)
+        self.assertEqual(renamed_commands, result)
+
+    @patch.object(redis_service.RedisApp, 'rename_commands')
+    def test_rename_commands(self, rename_commands):
+        renamed_commands = [
+            ["shutdown", "renamed_shutdown"],
+            ["eval", "renamed_eval"]]
+        self.manager.rename_commands(self.context, renamed_commands)
+        self.assertTrue(rename_commands.called)

@@ -329,7 +329,7 @@ class DBaaSAPINotification(object):
 
     def optional_end_traits(self):
         'Returns list of optional traits for end notification'
-        return []
+        return ['instance_id']
 
     def required_error_traits(self):
         'Returns list of required traits for error notification'

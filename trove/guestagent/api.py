@@ -651,3 +651,74 @@ class API(object):
 
         return self._call("module_remove", self.agent_high_timeout,
                           version=version, module=module)
+
+    def get_renamed_commands(self):
+        LOG.debug("Get renamed commands for %s.", self.id)
+        version = self.API_BASE_VERSION
+        return self._call("get_renamed_commands", self.agent_high_timeout,
+                          version=version)
+
+    def rename_commands(self, commands):
+        LOG.debug("Rename commands %s for %s.", commands, self.id)
+        version = self.API_BASE_VERSION
+        return self._call("rename_commands", self.agent_high_timeout,
+                          version=version, commands=commands)
+
+    def get_ha(self):
+        LOG.debug("Get HA status for %s.", self.id)
+        version = self.API_BASE_VERSION
+        return self._call("get_ha", self.agent_high_timeout, version=version)
+
+    def set_ha(self, ha_config):
+        LOG.debug("Set HA %s for %s.", ha_config, self.id)
+        version = self.API_BASE_VERSION
+        return self._call("set_ha", self.agent_high_timeout,
+                          version=version, ha_config=ha_config)
+
+    def delete_ha(self):
+        LOG.debug("Delete HA for %s.", self.id)
+        version = self.API_BASE_VERSION
+        return self._call("delete_ha", self.agent_high_timeout,
+                          version=version)
+
+    def get_sync_info(self, info_type):
+        LOG.debug("Get master information from %s.", self.id)
+        version = self.API_BASE_VERSION
+        try:
+            return self._call("get_sync_info", self.agent_high_timeout,
+                              version=version, info_type=info_type)
+        except exception.GuestError as e:
+            # Just ignore some old images doesn't have this method
+            if "Endpoint does not support RPC method" in str(e):
+                LOG.debug(
+                    "The version before Train is not support this method.")
+            else:
+                raise
+
+    def sync_from_master_info(self, info_type, info):
+        LOG.debug("Sync master information %s to %s.", info, self.id)
+        version = self.API_BASE_VERSION
+        try:
+            return self._call("sync_from_master_info", self.agent_high_timeout,
+                              version=version, info_type=info_type, info=info)
+        except exception.GuestError as e:
+            # Just ignore some old images doesn't have this method
+            if "Endpoint does not support RPC method" in str(e):
+                LOG.debug(
+                    "The version before Train is not support this method.")
+            else:
+                raise
+
+    def post_detach_replica(self):
+        LOG.debug("Post detach replica: %s", self.id)
+        version = self.API_BASE_VERSION
+        try:
+            return self._call("post_detach_replica", self.agent_high_timeout,
+                              version=version)
+        except exception.GuestError as e:
+            # Just ignore some old images doesn't have this method
+            if "Endpoint does not support RPC method" in str(e):
+                LOG.debug(
+                    "The version before Train is not support this method.")
+            else:
+                raise

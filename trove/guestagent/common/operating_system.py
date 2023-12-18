@@ -22,6 +22,7 @@ import stat
 import tempfile
 
 from functools import reduce
+from oslo_concurrency import lockutils
 from oslo_concurrency.processutils import UnknownArgumentError
 
 from trove.common import exception
@@ -32,6 +33,9 @@ from trove.common import utils
 REDHAT = 'redhat'
 DEBIAN = 'debian'
 SUSE = 'suse'
+
+synchronized = lockutils.synchronized_with_prefix('trove')
+lock = lockutils.lock
 
 
 def read_file(path, codec=IdentityCodec(), as_root=False, decode=True):
@@ -867,3 +871,82 @@ def is_mount(path):
 def get_current_user():
     """Returns name of the current OS user"""
     return pwd.getpwuid(os.getuid())[0]
+
+
+def set_ha_master(vip, device):
+    """Add vip to dev for master."""
+    exec_args = {'run_as_root': True, 'root_helper': 'sudo'}
+    cmd_args = "address add %s/32 dev %s" % (vip, device)
+    cmd_args = cmd_args.split(" ")
+    stdout, stderr = utils.execute_with_timeout(
+        "/usr/sbin/ip",
+        *cmd_args,
+        **exec_args
+    )
+
+
+add_vip = set_ha_master
+
+
+def set_ha_slave(vip, device):
+    """Del vip to dev for slave."""
+    exec_args = {'run_as_root': True, 'root_helper': 'sudo'}
+    cmd_args = "address del %s/32 dev %s" % (vip, device)
+    cmd_args = cmd_args.split(" ")
+    stdout, stderr = utils.execute_with_timeout(
+        "/usr/sbin/ip",
+        *cmd_args,
+        **exec_args
+    )
+
+
+remove_vip = set_ha_slave
+
+
+def custom_config_ini_get(key, dict_args={}):
+    if 'cmd' in dict_args.keys():
+        cmd = dict_args['cmd']
+    else:
+        cmd = 'crudini'
+    if 'file' in dict_args.keys():
+        config = dict_args['file']
+    else:
+        config = '~/.redis'
+    if 'section' in dict_args.keys():
+        section = dict_args['section']
+    else:
+        section = 'redis-sentinel'
+    command = '%s --get %s %s %s' % (
+        cmd, config, section, key
+    )
+    value = utils.execute_with_timeout(
+        command, shell=True, check_exit_code=False,
+        run_as_root=False
+    )
+
+    value = list(value)[0].strip('\n')
+    return value
+
+
+def custom_config_ini_set(dict_args={}):
+    if 'cmd' in dict_args.keys():
+        cmd = dict_args['cmd']
+    else:
+        cmd = 'crudini'
+    if 'file' in dict_args.keys():
+        config = dict_args['file']
+    else:
+        config = '~/.redis'
+    if 'section' in dict_args.keys():
+        section = dict_args['section']
+    else:
+        section = 'redis-sentinel'
+
+    for key in dict_args.keys():
+        command = '%s --set %s %s %s %s' % (
+            cmd, config, section, key, str(dict_args[key])
+        )
+        utils.execute_with_timeout(
+            command, shell=True, check_exit_code=False,
+            run_as_root=False
+        )

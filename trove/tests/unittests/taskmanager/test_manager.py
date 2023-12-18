@@ -77,6 +77,9 @@ class TestManager(trove_testtools.TestCase):
     def test_detach_replica(self):
         slave = Mock()
         master = Mock()
+        master.slaves = []
+        master.guest = Mock()
+        master.guest.sync_from_master_info = Mock(return_value={})
         with patch.object(models.BuiltInstanceTasks, 'load',
                           side_effect=[slave, master]):
             self.manager.detach_replica(self.context, 'some-inst-id')
@@ -197,8 +200,12 @@ class TestManager(trove_testtools.TestCase):
         mock_tasks.get_replication_master_snapshot = Mock(
             return_value=mock_snapshot)
         mock_flavor = Mock()
+        master = Mock()
+        master.slaves = []
+        master.guest = Mock()
+        master.guest.sync_from_master_info = Mock(return_value={})
         with patch.object(models.FreshInstanceTasks, 'load',
-                          return_value=mock_tasks):
+                          side_effect=[mock_tasks, master]):
             self.manager.create_instance(self.context, ['id1'], Mock(),
                                          mock_flavor, Mock(), None, None,
                                          'mysql', 'mysql-server', 2,

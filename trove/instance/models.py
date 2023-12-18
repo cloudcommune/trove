@@ -783,9 +783,7 @@ class BaseInstance(SimpleInstance):
         try:
             if self.volume_id:
                 volume = self.volume_client.volumes.get(self.volume_id)
-                if volume.status in ["available", "error"]:
-                    LOG.info("Deleting volume %s for instance %s",
-                             self.volume_id, self.id)
+                if volume.status == "available":
                     volume.delete()
         except Exception as e:
             LOG.warning("Failed to delete volume for instance %s, error: %s",
@@ -915,6 +913,13 @@ class BaseInstance(SimpleInstance):
         reset_instance.set_status(tr_instance.ServiceStatuses.UNKNOWN)
         reset_instance.save()
 
+    def get_volume_qos(self):
+        return self.nova_client.volume_qos.get_volume_qos(self.server_id)
+
+    def set_volume_qos(self, qos_config):
+        return self.nova_client.volume_qos.set_volume_qos(self.server_id,
+                                                          qos_config)
+
 
 class FreshInstance(BaseInstance):
     @classmethod
@@ -1004,7 +1009,8 @@ class Instance(BuiltInstance):
                availability_zone=None, nics=None,
                configuration_id=None, slave_of_id=None, cluster_config=None,
                replica_count=None, volume_type=None, modules=None,
-               locality=None, region_name=None, access=None):
+               locality=None, region_name=None, access=None,
+               qos_specs=None):
 
         region_name = region_name or CONF.service_credentials.region_name
 
@@ -1240,13 +1246,16 @@ class Instance(BuiltInstance):
                 instance_id = ids
                 instance_name = names
                 root_password = root_passwords
+            kw = {}
+            if qos_specs:
+                kw = {'qos_specs': qos_specs}
             task_api.API(context).create_instance(
                 instance_id, instance_name, flavor, image_id, databases, users,
                 datastore_version.manager, datastore_version.packages,
                 volume_size, backup_id, availability_zone, root_password,
                 nics, overrides, slave_of_id, cluster_config,
                 volume_type=volume_type, modules=module_list,
-                locality=locality, access=access)
+                locality=locality, access=access, **kw)
 
             return SimpleInstance(context, db_info, service_status,
                                   root_password, locality=locality)
@@ -1308,7 +1317,7 @@ class Instance(BuiltInstance):
         task_api.API(self.context).resize_flavor(self.id, old_flavor,
                                                  new_flavor)
 
-    def resize_volume(self, new_size):
+    def resize_volume(self, new_size, qos_specs=None):
         def _resize_resources():
             self.validate_can_perform_action()
             LOG.info("Resizing volume of instance %s.", self.id)
@@ -1321,7 +1330,8 @@ class Instance(BuiltInstance):
                                              "size of '%s'.") % old_size)
             # Set the task to Resizing before sending off to the taskmanager
             self.update_db(task_status=InstanceTasks.RESIZING)
-            task_api.API(self.context).resize_volume(new_size, self.id)
+            task_api.API(self.context).resize_volume(new_size, self.id,
+                                                     qos_specs=qos_specs)
 
         if not self.volume_size:
             raise exception.BadRequest(_("Instance %s has no volume.")
@@ -1512,9 +1522,9 @@ class Instance(BuiltInstance):
         """
 
         LOG.debug("Applying configuration on instance: %s", self.id)
-        overrides = configuration.get_configuration_overrides()
+        overrides = configuration.get_configuration_not_need_restart()
 
-        if not configuration.does_configuration_need_restart():
+        if len(overrides) > 0:
             LOG.debug("Applying runtime configuration changes.")
             self.guest.apply_overrides(overrides)
             LOG.debug("Configuration has been applied.")
@@ -1575,12 +1585,7 @@ class Instance(BuiltInstance):
             default_config = self._render_config_dict(flavor)
             current_config = Configuration(self.context, configuration_id)
             current_overrides = current_config.get_configuration_overrides()
-            # Check the configuration template has defaults for all modified
-            # values.
-            has_defaults_for_all = all(key in default_config.keys()
-                                       for key in current_overrides.keys())
-            if (not current_config.does_configuration_need_restart() and
-                    has_defaults_for_all):
+            if not current_config.does_configuration_need_restart():
                 LOG.debug("Applying runtime configuration changes.")
                 self.guest.apply_overrides(
                     {k: v for k, v in default_config.items()

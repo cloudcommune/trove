@@ -163,9 +163,13 @@ class Configuration(object):
             if not rule:
                 continue
             if rule.data_type == 'boolean':
-                item.configuration_value = bool(int(item.configuration_value))
+                item.configuration_value = bool(eval(item.configuration_value))
             elif rule.data_type == 'integer':
                 item.configuration_value = int(item.configuration_value)
+            elif rule.data_type == 'list':
+                item.configuration_value = eval(item.configuration_value)
+            elif rule.data_type == 'dict':
+                item.configuration_value = eval(item.configuration_value)
             else:
                 item.configuration_value = str(item.configuration_value)
         return config_items
@@ -201,6 +205,24 @@ class Configuration(object):
             if bool(details.restart_required):
                 return True
         return False
+
+    def get_configuration_not_need_restart(self):
+        datastore_v = Configuration.load_configuration_datastore_version(
+            self.context,
+            self.configuration_id)
+        detail_list = DatastoreConfigurationParameters.load_parameters(
+            datastore_v.id, show_deleted=True)
+        overrides = self.get_configuration_overrides()
+        for i in overrides.keys():
+            LOG.debug("config item: %s" % i)
+            details = Configuration.find_parameter_details(
+                i, detail_list)
+            LOG.debug("parameter details: %s" % details)
+            if not details:
+                raise exception.NotFound(uuid=i)
+            if bool(details.restart_required):
+                del overrides[i]
+        return overrides
 
     @staticmethod
     def save(configuration, configuration_items):
@@ -254,6 +276,13 @@ class DBConfigurationParameter(dbmodels.DatabaseModelBase):
 
     def __hash__(self):
         return self.configuration_key.__hash__()
+
+    def save(self):
+        value = self.configuration_value
+        self.configuration_value = str(self.configuration_value)
+        result = super(DBConfigurationParameter, self).save()
+        self.configuration_value = value
+        return result
 
 
 class DBDatastoreConfigurationParameters(dbmodels.DatabaseModelBase):

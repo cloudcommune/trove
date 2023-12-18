@@ -15,13 +15,14 @@
 #
 import uuid
 
-from mock import Mock, patch
+from mock import Mock, patch, call
 
 from trove.common import exception
 from trove.datastore import models as datastore_models
 from trove.extensions.common import models
-from trove.extensions.redis.models import RedisRoot
-from trove.extensions.redis.service import RedisRootController
+from trove.extensions.redis.models import RedisRoot, RedisGuestAgent
+from trove.extensions.redis.service import RedisCommandController,\
+    RedisRootController
 from trove.instance import models as instance_models
 from trove.instance.models import DBInstance
 from trove.instance.tasks import InstanceTasks
@@ -234,3 +235,189 @@ class TestRedisRootController(trove_testtools.TestCase):
             req, tenant_id, instance_id, is_cluster)
         root_load.assert_called_with(context, instance_id)
         root_delete.assert_not_called()
+
+
+class TestRedisCommandController(trove_testtools.TestCase):
+
+    @patch.object(task_api.API, 'get_client', Mock(return_value=Mock()))
+    def setUp(self):
+        util.init_db()
+        self.context = trove_testtools.TroveTestContext(self, is_admin=True)
+        self.datastore = datastore_models.DBDatastore.create(
+            id=str(uuid.uuid4()),
+            name='redis' + str(uuid.uuid4()),
+        )
+        self.datastore_version = (
+            datastore_models.DBDatastoreVersion.create(
+                id=str(uuid.uuid4()),
+                datastore_id=self.datastore.id,
+                name="3.2" + str(uuid.uuid4()),
+                manager="redis",
+                image_id="image_id",
+                packages="",
+                active=True))
+        self.tenant_id = "UUID"
+        self.single_db_info = DBInstance.create(
+            id="redis-single",
+            name="redis-single",
+            flavor_id=1,
+            datastore_version_id=self.datastore_version.id,
+            tenant_id=self.tenant_id,
+            volume_size=None,
+            task_status=InstanceTasks.NONE)
+        self.master_db_info = DBInstance.create(
+            id="redis-master",
+            name="redis-master",
+            flavor_id=1,
+            datastore_version_id=self.datastore_version.id,
+            tenant_id=self.tenant_id,
+            volume_size=None,
+            task_status=InstanceTasks.NONE)
+        self.slave_db_info = DBInstance.create(
+            id="redis-slave",
+            name="redis-slave",
+            flavor_id=1,
+            datastore_version_id=self.datastore_version.id,
+            tenant_id=self.tenant_id,
+            volume_size=None,
+            task_status=InstanceTasks.NONE,
+            slave_of_id=self.master_db_info.id)
+
+        self.renamed_commands = {
+            "shutdown": "renamed_shutdown",
+            "eval": "renamed_eval"}
+        self.single_renamed_commands = {
+            "shutdown": "renamed_shutdown",
+            "eval": "renamed_eval"}
+        self.master_renamed_commands = {
+            "shutdown": "renamed_shutdown",
+            "eval": "renamed_eval"}
+        self.slave_renamed_commands = {
+            "shutdown": "renamed_shutdown",
+            "eval": "renamed_eval"}
+        super(TestRedisCommandController, self).setUp()
+        self.controller = RedisCommandController()
+
+    def tearDown(self):
+        self.datastore.delete()
+        self.datastore_version.delete()
+        self.master_db_info.delete()
+        self.slave_db_info.delete()
+        super(TestRedisCommandController, self).tearDown()
+
+    @patch.object(instance_models.Instance, "load")
+    @patch.object(RedisGuestAgent, "get_renamed_commands")
+    def test_get_renamed_commands_on_single_instance(
+            self, get_renamed_commands, *args):
+        get_renamed_commands.return_value = self.single_renamed_commands
+        user = Mock()
+        context = Mock()
+        context.user = Mock()
+        context.user.__getitem__ = Mock(return_value=user)
+        req = Mock()
+        req.environ = Mock()
+        req.environ.__getitem__ = Mock(return_value=context)
+        tenant_id = self.tenant_id
+        instance_id = self.single_db_info.id
+        is_cluster = False
+        self.controller.get_renamed_commands(req, tenant_id,
+                                             instance_id, is_cluster)
+        get_renamed_commands.assert_called_with(context, instance_id)
+
+    @patch.object(instance_models.Instance, "load")
+    @patch.object(RedisGuestAgent, "get_renamed_commands")
+    def test_get_renamed_commands_on_master_instance(
+            self, get_renamed_commands, *args):
+        get_renamed_commands.return_value = self.master_renamed_commands
+        user = Mock()
+        context = Mock()
+        context.user = Mock()
+        context.user.__getitem__ = Mock(return_value=user)
+        req = Mock()
+        req.environ = Mock()
+        req.environ.__getitem__ = Mock(return_value=context)
+        tenant_id = self.tenant_id
+        master_id = self.master_db_info.id
+        is_cluster = False
+        self.controller.get_renamed_commands(req, tenant_id,
+                                             master_id, is_cluster)
+        get_renamed_commands.assert_called_with(context, master_id)
+
+    @patch.object(instance_models.Instance, "load")
+    @patch.object(RedisGuestAgent, "get_renamed_commands")
+    def test_get_renamed_commands_on_slave(self, get_renamed_commands, *args):
+        get_renamed_commands.return_value = self.single_renamed_commands
+        user = Mock()
+        context = Mock()
+        context.user = Mock()
+        context.user.__getitem__ = Mock(return_value=user)
+        req = Mock()
+        req.environ = Mock()
+        req.environ.__getitem__ = Mock(return_value=context)
+        tenant_id = self.tenant_id
+        slave_id = self.slave_db_info.id
+        is_cluster = False
+        self.controller.get_renamed_commands(req, tenant_id,
+                                             slave_id, is_cluster)
+        get_renamed_commands.assert_called_with(context, slave_id)
+
+    @patch.object(instance_models.Instance, "load")
+    @patch.object(RedisGuestAgent, "get_renamed_commands")
+    @patch.object(RedisGuestAgent, "rename_commands")
+    def test_rename_commands_on_single_instance(self, rename_commands,
+                                                get_renamed_commands, *args):
+        rename_commands.return_value = self.single_renamed_commands
+        get_renamed_commands.return_value = []
+        user = Mock()
+        context = Mock()
+        context.user = Mock()
+        context.user.__getitem__ = Mock(return_value=user)
+        req = Mock()
+        req.environ = Mock()
+        req.environ.__getitem__ = Mock(return_value=context)
+        tenant_id = self.tenant_id
+        instance_id = self.single_db_info.id
+        is_cluster = False
+        body = self.single_renamed_commands
+        self.controller.rename_commands(req, body, tenant_id,
+                                        instance_id, is_cluster)
+        rename_commands.assert_called_with(context, instance_id, body)
+
+    @patch.object(instance_models.Instance, "load")
+    @patch.object(RedisGuestAgent, "get_renamed_commands")
+    @patch.object(RedisGuestAgent, "rename_commands")
+    def test_rename_commands_on_master_instance(self, rename_commands,
+                                                get_renamed_commands, *args):
+        rename_commands.return_value = self.single_renamed_commands
+        get_renamed_commands.return_value = []
+        user = Mock()
+        context = Mock()
+        context.user = Mock()
+        context.user.__getitem__ = Mock(return_value=user)
+        req = Mock()
+        req.environ = Mock()
+        req.environ.__getitem__ = Mock(return_value=context)
+        tenant_id = self.tenant_id
+        master_id = self.master_db_info.id
+        slave_id = self.slave_db_info.id
+        is_cluster = False
+        body = self.single_renamed_commands
+        self.controller.rename_commands(req, body, tenant_id,
+                                        master_id, is_cluster)
+        calls = [call(context, master_id, body),
+                 call(context, slave_id, body)]
+        rename_commands.assert_has_calls(calls)
+
+    def test_rename_commands_on_slave(self):
+        context = Mock()
+        req = Mock()
+        req.environ = Mock()
+        req.environ.__getitem__ = Mock(return_value=context)
+        tenant_id = self.tenant_id
+        instance_id = self.slave_db_info.id
+        is_cluster = False
+        body = self.slave_renamed_commands
+        self.assertRaises(
+            exception.SlaveOperationNotSupported,
+            self.controller.rename_commands,
+            req, body, tenant_id, instance_id, is_cluster)

@@ -20,18 +20,24 @@ from six.moves import configparser as config_parser
 
 import trove
 from trove.common import extensions
+from trove.extensions.routes.ha import HighAvailability
 from trove.extensions.routes.mgmt import Mgmt
 from trove.extensions.routes.mysql import Mysql
+from trove.extensions.routes.redis import Redis
 from trove.tests.unittests import trove_testtools
 
 DEFAULT_EXTENSION_MAP = {
     'Mgmt': [Mgmt, extensions.ExtensionDescriptor],
-    'MYSQL': [Mysql, extensions.ExtensionDescriptor]
+    'MYSQL': [Mysql, extensions.ExtensionDescriptor],
+    'REDIS': [Redis, extensions.ExtensionDescriptor],
+    'HA': [HighAvailability, extensions.ExtensionDescriptor]
 }
 
 EP_TEXT = '''
 mgmt = trove.extensions.routes.mgmt:Mgmt
 mysql = trove.extensions.routes.mysql:Mysql
+redis = trove.extensions.routes.redis:Redis
+ha = trove.extensions.routes.ha:HighAvailability
 invalid = trove.tests.unittests.api.common.test_extensions:InvalidExtension
 '''
 

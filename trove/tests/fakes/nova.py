@@ -446,7 +446,8 @@ class FakeVolumes(object):
             else:
                 raise nova_exceptions.NotFound(404, "Bad permissions")
 
-    def create(self, size, name=None, description=None, volume_type=None):
+    def create(self, size, name=None, description=None, volume_type=None,
+               availability_zone=None):
         id = "FAKE_VOL_%s" % uuid.uuid4()
         volume = FakeVolume(self, self.context, id, size, name,
                             description, volume_type)

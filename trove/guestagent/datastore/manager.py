@@ -252,6 +252,14 @@ class Manager(periodic_task.PeriodicTasks):
         LOG.debug("Update status called.")
         self.status.update()
 
+    @periodic_task.periodic_task(spacing=CONF.instance_update_custom_interval)
+    def update_custom_status(self, context):
+        """Update the role of the redis instance. It is decorated with
+        perodic_task so it is called automatically.
+        """
+        LOG.debug("Update redis role called.")
+        self.status.update_custom()
+
     def rpc_ping(self, context):
         LOG.debug("Responding to RPC ping.")
         return True
@@ -740,6 +748,27 @@ class Manager(periodic_task.PeriodicTasks):
         module_manager.ModuleManager.remove_module(
             driver, module_type, id, name, datastore, ds_version)
         LOG.info("Deleted module: %s", name)
+
+    ################
+    # HA related
+    ################
+    def get_ha(self, context):
+        pass
+
+    def set_ha(self, context, ha_config):
+        pass
+
+    def delete_ha(self, context):
+        pass
+
+    def get_sync_info(self, context, info_type):
+        pass
+
+    def sync_from_master_info(self, context, info_type, info):
+        pass
+
+    def post_detach_replica(self, context):
+        pass
 
     ###############
     # Not Supported

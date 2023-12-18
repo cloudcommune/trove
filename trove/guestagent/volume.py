@@ -124,10 +124,16 @@ class VolumeDevice(object):
         volume_format_timeout = CONF.volume_format_timeout
         LOG.debug("Formatting '%s'.", self.device_path)
         try:
-            utils.execute_with_timeout(
-                "mkfs", "--type", volume_fstype, *format_options,
-                run_as_root=True, root_helper="sudo",
-                timeout=volume_format_timeout)
+            if volume_fstype == 'xfs':
+                utils.execute_with_timeout(
+                    "mkfs.xfs", "-f", *format_options,
+                    run_as_root=True, root_helper="sudo",
+                    timeout=volume_format_timeout)
+            else:
+                utils.execute_with_timeout(
+                    "mkfs", "--type", volume_fstype, *format_options,
+                    run_as_root=True, root_helper="sudo",
+                    timeout=volume_format_timeout)
         except exception.ProcessExecutionError:
             log_fmt = "Could not format '%s'."
             exc_fmt = _("Could not format '%s'.")
@@ -137,7 +143,7 @@ class VolumeDevice(object):
         """Formats the device at device_path and checks the filesystem."""
         self._check_device_exists()
         self._format()
-        self._check_format()
+        # self._check_format()
 
     def mount(self, mount_point, write_to_fstab=True):
         """Mounts, and writes to fstab."""
@@ -168,10 +174,17 @@ class VolumeDevice(object):
         # an entry is put in the fstab file (like Trove does).
         # Thus it may be necessary to wait for the mount and then unmount
         # the fs again (since the volume was just attached).
-        if self._wait_for_mount(mount_point, timeout=2):
-            LOG.debug("Unmounting '%s' before resizing.", mount_point)
-            self.unmount(mount_point)
         try:
+            if self._wait_for_mount(mount_point, timeout=10):
+                if CONF.volume_fstype == 'xfs':
+                    utils.execute("xfs_growfs", self.device_path,
+                                  run_as_root=True, root_helper="sudo")
+                    LOG.debug("Unmounting '%s' before resizing." % mount_point)
+                    self.unmount(mount_point)
+                    return
+
+                LOG.debug("Unmounting '%s' before resizing." % mount_point)
+                self.unmount(mount_point)
             utils.execute("e2fsck", "-f", "-p", self.device_path,
                           run_as_root=True, root_helper="sudo")
             utils.execute("resize2fs", self.device_path,

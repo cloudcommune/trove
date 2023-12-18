@@ -36,6 +36,7 @@ from trove.common import clients
 from trove.common.clients import create_cinder_client
 from trove.common.clients import create_dns_client
 from trove.common.clients import create_guest_client
+from trove.common import context as trove_context
 from trove.common import crypto_utils as cu
 from trove.common import exception
 from trove.common.exception import BackupCreationError
@@ -144,6 +145,26 @@ class NotifyMixin(object):
             service="taskmanager", publisher_id=publisher_id)
 
         notifier.info(self.context, event_type, payload)
+
+    def send_update_event(self, event_type, instance_id, **kwargs):
+        event_type = 'trove.instance.%s' % event_type
+        publisher_id = CONF.host
+        # Update payload with all other kwargs
+        payload = {
+            "instance_id": instance_id
+        }
+        payload.update(kwargs)
+        LOG.debug('Sending event: %(event_type)s, %(payload)s' %
+                  {'event_type': event_type, 'payload': payload})
+
+        notifier = rpc.get_notifier(
+            service="taskmanager", publisher_id=publisher_id)
+        context = trove_context.TroveContext(
+            user=CONF.nova_proxy_admin_user,
+            auth_token=None,
+            tenant=CONF.nova_proxy_admin_tenant_id
+        )
+        notifier.info(context, event_type, payload)
 
 
 class ConfigurationMixin(object):
@@ -503,7 +524,7 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
             if len(CONF.management_security_groups) > 0:
                 port_sgs = CONF.management_security_groups
             # The management network is always the last one
-            networks.pop(-1)
+            # networks.pop(-1)
             port_id = self._create_port(
                 CONF.management_networks[-1],
                 port_sgs,
@@ -515,18 +536,18 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
 
         # Create port in the user defined network, associate floating IP if
         # needed
-        if len(networks) > 1 or not CONF.management_networks:
-            network = networks.pop(0).get("net-id")
-            port_sgs = [security_group] if security_group else []
-            port_id = self._create_port(
-                network,
-                port_sgs,
-                is_mgmt=False,
-                is_public=access.get('is_public', False)
-            )
-            LOG.info("User port %s created for instance %s", port_id,
-                     self.id)
-            networks.insert(0, {"port-id": port_id})
+        # if len(networks) > 1 or not CONF.management_networks:
+        #    network = networks.pop(0).get("net-id")
+        #    port_sgs = [security_group] if security_group else []
+        #    port_id = self._create_port(
+        #        network,
+        #        port_sgs,
+        #        is_mgmt=False,
+        #        is_public=access.get('is_public', False)
+        #    )
+        #    LOG.info("User port %s created for instance %s", port_id,
+        #             self.id)
+        #    networks.insert(0, {"port-id": port_id})
 
         LOG.info(
             "Finished to prepare networks for the instance %s, networks: %s",
@@ -538,7 +559,8 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
                         datastore_manager, packages, volume_size,
                         backup_id, availability_zone, root_password, nics,
                         overrides, cluster_config, snapshot, volume_type,
-                        modules, scheduler_hints, access=None):
+                        modules, scheduler_hints, access=None,
+                        qos_specs=None):
         """Create trove instance.
 
         It is the caller's responsibility to ensure that
@@ -560,7 +582,7 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
             datastore_manager, volume_size,
             availability_zone, networks,
             files, cinder_volume_type,
-            scheduler_hints
+            scheduler_hints, qos_specs
         )
 
         config = self._render_config(flavor)
@@ -813,13 +835,17 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
 
     def _create_server_volume(self, flavor_id, image_id, datastore_manager,
                               volume_size, availability_zone, nics, files,
-                              volume_type, scheduler_hints):
+                              volume_type, scheduler_hints, qos_specs=None):
         LOG.debug("Begin _create_server_volume for id: %s", self.id)
         server = None
-        volume_info = self._build_volume_info(datastore_manager,
-                                              volume_size=volume_size,
-                                              volume_type=volume_type)
+        volume_info = self._build_volume_info(
+            datastore_manager,
+            volume_size=volume_size,
+            volume_type=volume_type,
+            availability_zone=availability_zone)
         block_device_mapping_v2 = volume_info['block_device']
+        if qos_specs and len(block_device_mapping_v2) >= 1:
+            block_device_mapping_v2[-1]['qos_specs'] = qos_specs
         try:
             server = self._create_server(
                 flavor_id, image_id,
@@ -840,7 +866,7 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
         return volume_info
 
     def _build_volume_info(self, datastore_manager, volume_size=None,
-                           volume_type=None):
+                           volume_type=None, availability_zone=None):
         volume_info = None
         volume_support = self.volume_support
         device_path = self.device_path
@@ -849,7 +875,8 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
         if volume_support:
             try:
                 volume_info = self._create_volume(
-                    volume_size, volume_type, datastore_manager)
+                    volume_size, volume_type,
+                    datastore_manager, availability_zone)
             except Exception as e:
                 log_fmt = "Failed to create volume for instance %s"
                 exc_fmt = _("Failed to create volume for instance %s")
@@ -884,14 +911,16 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
         full_message = "%s%s" % (exc_fmt % fmt_content, exc_message)
         raise TroveError(message=full_message)
 
-    def _create_volume(self, volume_size, volume_type, datastore_manager):
+    def _create_volume(self, volume_size, volume_type,
+                       datastore_manager, availability_zone):
         LOG.debug("Begin _create_volume for id: %s", self.id)
         volume_client = create_cinder_client(self.context, self.region_name)
         volume_desc = ("datastore volume for %s" % self.id)
         volume_ref = volume_client.volumes.create(
             volume_size, name="trove-%s" % self.id,
             description=volume_desc,
-            volume_type=volume_type)
+            volume_type=volume_type,
+            availability_zone=availability_zone)
 
         # Record the volume ID in case something goes wrong.
         self.update_db(volume_id=volume_ref.id)
@@ -1078,12 +1107,14 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
     associated with a compute server.
     """
 
-    def resize_volume(self, new_size):
+    def resize_volume(self, new_size, qos_specs=None):
         LOG.info("Resizing volume for instance %(instance_id)s from "
-                 "%(old_size)s GB to %(new_size)s GB.",
+                 "%(old_size)s GB to %(new_size)s GB. "
+                   "qos_specs to %(qos_specs)s",
                  {'instance_id': self.id, 'old_size': self.volume_size,
-                  'new_size': new_size})
-        action = ResizeVolumeAction(self, self.volume_size, new_size)
+                  'new_size': new_size, 'qos_specs': qos_specs})
+        action = ResizeVolumeAction(self, self.volume_size, new_size,
+                                    qos_specs=qos_specs)
         action.execute()
         LOG.info("Resized volume for instance %s successfully.", self.id)
 
@@ -1134,9 +1165,10 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
     def detach_replica(self, master, for_failover=False):
         LOG.debug("Calling detach_replica on %s", self.id)
         try:
-            self.guest.detach_replica(for_failover)
+            replica_info = self.guest.detach_replica(for_failover)
             self.update_db(slave_of_id=None)
             self.slave_list = None
+            master.guest.cleanup_source_on_replica_detach(replica_info)
         except (GuestError, GuestTimeout):
             LOG.exception("Failed to detach replica %s.", self.id)
             raise
@@ -1552,10 +1584,11 @@ class ModuleTasks(object):
 class ResizeVolumeAction(object):
     """Performs volume resize action."""
 
-    def __init__(self, instance, old_size, new_size):
+    def __init__(self, instance, old_size, new_size, qos_specs=None):
         self.instance = instance
         self.old_size = int(old_size)
         self.new_size = int(new_size)
+        self.qos_specs = qos_specs
 
     def get_mount_point(self):
         mount_point = CONF.get(
@@ -1735,6 +1768,21 @@ class ResizeVolumeAction(object):
             self._recover_full(self._verify_extend)
             raise
 
+    def _set_volume_qos(self):
+        if self.qos_specs is None:
+            return None
+        result = None
+        qos_config = [{'volume_id': self.instance.volume_id,
+                      'qos_specs': self.qos_specs}]
+        try:
+            result = self.instance.set_volume_qos(qos_config)
+            LOG.debug("Set instance %s with qos_config: %s, result: %s",
+                      self.instance.id, qos_config, result)
+        except BaseException as e:
+            LOG.error("Set instance %s with qos_config: %s ERROR: %s",
+                      self.instance.id, qos_config, str(e))
+        return result
+
     def _resize_active_volume(self):
         LOG.debug("Begin _resize_active_volume for id: %(id)s", {
                   'id': self.instance.id})
@@ -1745,6 +1793,7 @@ class ResizeVolumeAction(object):
         self._verify_extend()
         # if anything fails after this point, recovery is futile
         self._attach_volume(recover_func=self._fail)
+        self._set_volume_qos()
         self._resize_fs(recover_func=self._fail)
         self._mount_volume(recover_func=self._fail)
         self.instance.restart()
@@ -1845,7 +1894,9 @@ class ResizeActionBase(object):
     def _confirm_nova_action(self):
         LOG.debug("Instance %s calling Compute confirm resize...",
                   self.instance.id)
-        self.instance.server.confirm_resize()
+        self.instance.refresh_compute_server_info()
+        if self.instance.server_status_matches(["VERIFY_RESIZE"]):
+            self.instance.server.confirm_resize()
 
     def _datastore_is_online(self):
         self.instance._refresh_datastore_status()

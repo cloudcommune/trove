@@ -122,3 +122,11 @@ class API(object):
         cctxt.cast(self.context, "notify_exc_info",
                    serialized_notification=serialized,
                    message=message, exception=exception)
+
+    def promote_replica_to_master_in_db(self, instance_id):
+        LOG.debug("Promote instance %s to master in database", instance_id)
+        version = self.API_BASE_VERSION
+
+        cctxt = self.client.prepare(version=version)
+        cctxt.cast(self.context, "promote_replica_to_master_in_db",
+                   instance_id=instance_id)

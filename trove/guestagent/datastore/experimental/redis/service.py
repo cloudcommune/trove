@@ -13,6 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import hashlib
+import math
+import netifaces
 import os
 import redis
 from redis.exceptions import BusyLoadingError, ConnectionError
@@ -33,13 +36,17 @@ from trove.guestagent.common import operating_system
 from trove.guestagent.datastore.experimental.redis import system
 from trove.guestagent.datastore import service
 from trove.guestagent import pkg
+from trove.taskmanager.models import NotifyMixin
 
 LOG = logging.getLogger(__name__)
 TIME_OUT = 1200
 CONF = cfg.CONF
 CLUSTER_CFG = 'clustering'
 SYS_OVERRIDES_AUTH = 'auth_password'
+Redis_Sentinel_Quonum = 1
 packager = pkg.Package()
+ALLOW_DISABLED_COMMANDS = ["FLUSHALL", "FLUSHDB", "KEYS", "HGETALL",
+                           "EVAL", "EVALSHA", "SCRIPT", "MONITOR", "SHUTDOWN"]
 
 
 class RedisAppStatus(service.BaseDbStatus):
@@ -73,6 +80,138 @@ class RedisAppStatus(service.BaseDbStatus):
                                    run_as_root=True,
                                    root_helper='sudo')
 
+    def _get_actual_db_custom_status(self):
+        """Find and report role of DB on this machine.
+        The database is updated and the status is also returned.
+        """
+        if self.is_installed and not self._is_restarting:
+            LOG.debug("Determining role of DB server.")
+            custom = self._check_redis_role()
+            LOG.debug("role is %s and is_change is %s." % (
+                custom['role'],
+                custom['is_change'])
+            )
+        sentinel_enabled = operating_system.custom_config_ini_get(
+            key='sentinel_enabled'
+        )
+
+        status = {"is_notify": False}
+        if sentinel_enabled == "True":
+            # update_quorum = self._check_redis_quorum()
+            # if update_quorum['is_change']:
+            #     kwargs = {'quorum': update_quorum["quorum"]}
+            #     RedisApp().upload_redis_sentinel_config(**kwargs)
+            if custom['is_change']:
+                operating_system.custom_config_ini_set(
+                    dict_args={'role': custom['role']}
+                )
+                self.is_master(custom['role'])
+                if "master" in custom['role']:
+                    status['is_notify'] = True
+                    status.update({"role": "master"})
+                else:
+                    status.update({"role": "slave"})
+        else:
+            LOG.info("local node redis haproxy disable")
+        LOG.debug("custom status is: %s" % status)
+        return status
+
+    def _check_redis_role(self):
+        value = {
+            'is_change': False,
+            'status': 'active'
+        }
+        try:
+            if self.__client.ping():
+                info = self.__client.info(section='Replication')
+                value['role'] = info['role']
+                value['is_change'] = self._change_check(
+                    'role', value['role']
+                )
+                return value
+        except Exception:
+            LOG.exception("Error getting Redis role.")
+
+    def _check_redis_quorum(self):
+        quorum = 1
+        is_change = True
+        try:
+            context = operating_system.read_file(
+                '/etc/redis-sentinel.conf',
+                as_root=True
+            )
+            slave_num = context.count('known-sentinel')
+            if int(slave_num) >= 2:
+                quorum = int(math.floor((slave_num + 1) / 2) + 1)
+            is_change = self._change_check('quorum', quorum)
+        except Exception:
+            LOG.exception("Error getting Redis quorum.")
+        finally:
+            return {'quorum': quorum, 'is_change': is_change}
+
+    def _change_check(self, custom_key, value):
+        is_change = True
+        old = operating_system.custom_config_ini_get(key=custom_key)
+        if str(value) in str(old):
+            is_change = False
+        if is_change:
+            LOG.info("%s is_change true from %s to %s." % (
+                custom_key, old, value)
+            )
+        return is_change
+
+    def is_master(self, role):
+        vip, device = self._get_ha_info()
+        if "master" in role:
+            LOG.info("update role to master")
+            if self._check_vip(vip, device):
+                LOG.info("Add vip %s for %s" % (vip, device))
+                operating_system.set_ha_master(vip, device)
+        elif "slave" in role:
+            LOG.info("update role to slave")
+            if not self._check_vip(vip, device):
+                LOG.info("Remove vip %s for %s" % (vip, device))
+                operating_system.set_ha_slave(vip, device)
+
+    def _get_ha_info(self):
+        devs = netifaces.gateways()[netifaces.AF_INET]
+        dev = list(devs[0])[1]
+        vip = operating_system.custom_config_ini_get(key='vip')
+        LOG.debug("Get vip address: %s device: %s" % (vip, dev))
+        return vip, dev
+
+    def _check_vip(self, vip, device):
+        devs = netifaces.ifaddresses(device)[netifaces.AF_INET]
+        for dev in devs:
+            if vip in dev.values():
+                LOG.info("vip address: %s already exists" % vip)
+                return False
+        return True
+
+    def set_custom_status(self, status, force=False):
+        """Use guest to update the DB status."""
+
+        if force or self.is_installed:
+            LOG.debug("Casting redis role status message to notify "
+                      "( role is '%s' )." % status)
+            if status == 'master':
+                self.promote_to_master_in_db()
+            info = NotifyMixin()
+            kwargs = {
+                "role": status
+            }
+            info.send_update_event('update', CONF.guest_id, **kwargs)
+            LOG.debug("Successfully cast set_status.")
+        else:
+            LOG.debug("Prepare has not completed yet, skipping redis role "
+                      "check.")
+
+    def manual_update_custom_status(self):
+        status = self._get_actual_db_custom_status()
+        LOG.debug("manual update custom status: %s" % status)
+        if status['is_notify']:
+            self.set_custom_status(status['role'])
+
 
 class RedisApp(object):
     """
@@ -94,6 +233,8 @@ class RedisApp(object):
             ConfigurationManager.DEFAULT_STRATEGY_OVERRIDES_SUB_DIR)
         config_value_mappings = {'yes': True, 'no': False, "''": None}
         self._value_converter = StringConverter(config_value_mappings)
+        command_value_mappings = {'yes': True, 'no': False, "": None}
+        self._command_value_converter = StringConverter(command_value_mappings)
         self.configuration_manager = ConfigurationManager(
             system.REDIS_CONFIG,
             system.REDIS_OWNER, system.REDIS_OWNER,
@@ -102,9 +243,9 @@ class RedisApp(object):
                 string_mappings=config_value_mappings
             ), requires_root=True,
             override_strategy=OneFileOverrideStrategy(revision_dir))
-
         self.admin = self._build_admin_client()
         self.status = RedisAppStatus(self.admin)
+        self._sentinel_configration_manager = None
 
     def _build_admin_client(self):
         password = self.get_configuration_property('requirepass')
@@ -180,7 +321,7 @@ class RedisApp(object):
         """
         for prop_name, prop_args in overrides.items():
             args_string = self._join_lists(
-                self._value_converter.to_strings(prop_args), ' ')
+                self._command_value_converter.to_strings(prop_args), ' ')
             client.config_set(prop_name, args_string)
             # NOTE(zhaochao): requirepass applied in update_overrides is
             # only kept for back compatibility. Now requirepass is set
@@ -227,12 +368,14 @@ class RedisApp(object):
             system.SERVICE_CANDIDATES, self.state_change_wait_time,
             enable_on_boot=True, update_db=update_db)
 
-    def apply_initial_guestagent_configuration(self):
+    def apply_initial_guestagent_configuration(self, overrides):
         """Update guestagent-controlled configuration properties.
         """
 
         # Hide the 'CONFIG' command from end users by mangling its name.
-        self.admin.set_config_command_name(self._mangle_config_command_name())
+        self.admin.set_config_command_name(
+            self._mangle_config_command_name(overrides)
+        )
 
         self.configuration_manager.apply_system_override(
             {'daemonize': 'yes',
@@ -253,14 +396,139 @@ class RedisApp(object):
 
         return None
 
-    def _mangle_config_command_name(self):
+    def _mangle_config_command_name(self, overrides):
         """Hide the 'CONFIG' command from the clients by renaming it to a
         random string known only to the guestagent.
         Return the mangled name.
         """
-        mangled = utils.generate_random_password()
+        if 'vip' in overrides:
+            mangled = self._update_config_by_vip(overrides['vip'])
+        else:
+            mangled = utils.generate_random_password()
+        mangled = "redisconfig"
         self._rename_command('CONFIG', mangled)
         return mangled
+
+    def _update_config_by_vip(self, vip):
+        md5hash = hashlib.md5(vip)
+        mangled = md5hash.hexdigest()
+        operating_system.custom_config_ini_set(
+            dict_args={
+                'vip': vip,
+                'mangled': mangled,
+                'quorum': 1,
+                'port': 6379,
+                'passwd': "",
+                'enable_auth': "false"
+            }
+        )
+        return mangled
+
+    def upload_redis_sentinel_config(self, **kwargs):
+        LOG.debug("upload_redis_sentinel_config: %s", kwargs)
+        if 'sentinel_enabled' in kwargs.keys():
+            sentinel_enabled = kwargs['sentinel_enabled']
+            operating_system.custom_config_ini_set(
+                {'sentinel_enabled': sentinel_enabled}
+            )
+        else:
+            sentinel_enabled = operating_system.custom_config_ini_get(
+                key='sentinel_enabled'
+            )
+        service_candidates = ['redis-sentinel']
+        if 'type' in operating_system.service_discovery(service_candidates):
+            if str(sentinel_enabled) == 'True':
+                operating_system.stop_service(service_candidates)
+                config_content = \
+                    self.sentinel_configration_manager.parse_configuration()
+                LOG.debug(config_content)
+                myid = guestagent_utils.get_value_from_properties_dict(
+                    config_content, 'sentinel', 'myid')
+                if not myid:
+                    operating_system.copy(
+                        self._get_config_template('redis-sentinel.conf.j2'),
+                        system.SENTINEL_CONFIG, force=True, as_root=True)
+                    config_content = \
+                        self.sentinel_configration_manager\
+                            .parse_configuration()
+                    LOG.debug(config_content)
+                monitor = guestagent_utils.get_value_from_properties_dict(
+                    config_content, 'sentinel', 'monitor')
+
+                master_name = monitor[0] if monitor else 'mymaster'
+                monitor = monitor if monitor else \
+                    [master_name, '127.0.0.1', '6379', 1]
+                if 'master' in kwargs and kwargs.get('master'):
+                    monitor[1] = kwargs['master']
+                if 'port' in kwargs and kwargs.get('port'):
+                    monitor[2] = kwargs['port']
+                if 'quorum' in kwargs and kwargs.get('quorum'):
+                    monitor[3] = kwargs['quorum']
+                guestagent_utils.set_value_from_properties_dict(
+                    config_content, 'sentinel', 'monitor', monitor)
+                if 'mangled' in kwargs:
+                    guestagent_utils.set_value_from_properties_dict(
+                        config_content, 'sentinel', 'rename-command',
+                        [master_name, 'CONFIG', kwargs['mangled']])
+                if 'passwd' in kwargs and kwargs.get('passwd'):
+                    guestagent_utils.set_value_from_properties_dict(
+                        config_content, 'sentinel', 'auth-pass',
+                        [master_name, kwargs['passwd']])
+                if not myid:
+                    notification_script = \
+                        self._get_config_template('notify.sh')
+                    operating_system.chown(notification_script,
+                                           system.REDIS_OWNER,
+                                           system.REDIS_OWNER,
+                                           as_root=True)
+                    operating_system.chmod(
+                        notification_script,
+                        operating_system.FileMode.SET_USR_RWX,
+                        as_root=True)
+                    guestagent_utils.set_value_from_properties_dict(
+                        config_content, 'sentinel', 'notification-script',
+                        [master_name, notification_script])
+                    failover_script = self._get_config_template('failover.sh')
+                    operating_system.chown(failover_script, system.REDIS_OWNER,
+                                           system.REDIS_OWNER, as_root=True)
+                    operating_system.chmod(
+                        failover_script,
+                        operating_system.FileMode.SET_USR_RWX,
+                        as_root=True)
+                    operating_system.chmod(
+                        failover_script,
+                        operating_system.FileMode.SET_USR_RWX,
+                        as_root=True)
+                    guestagent_utils.set_value_from_properties_dict(
+                        config_content, 'sentinel', 'client-reconfig-script',
+                        [master_name, failover_script])
+                LOG.debug('before save: %s, %s',
+                          type(config_content), config_content)
+                self.sentinel_configration_manager.save_configuration(
+                    config_content)
+                operating_system.copy(
+                    system.SENTINEL_CONFIG, "/etc/redis-sentinel.conf.bak",
+                    force=True, as_root=True)
+                operating_system.enable_service_on_boot(service_candidates)
+                operating_system.start_service(service_candidates)
+            else:
+                operating_system.stop_service(service_candidates)
+                operating_system.disable_service_on_boot(service_candidates)
+            operating_system.custom_config_ini_set(dict_args=kwargs)
+        else:
+            LOG.warn("Can't find % service", service_candidates)
+
+    def _get_config_template(self, name):
+        dirpath = os.path.dirname(os.path.abspath(__file__))
+        template_file = os.path.join(dirpath, 'templates', name)
+        return template_file
+
+    def _redis_host_ip(self, device=None, vip=None):
+        devs = netifaces.ifaddresses(device)[netifaces.AF_INET]
+        for dev in devs:
+            if vip not in dev['addr']:
+                ip = dev['addr']
+        return ip
 
     def _rename_command(self, old_name, new_name):
         """It is possible to completely disable a command by renaming it
@@ -268,6 +536,34 @@ class RedisApp(object):
         """
         self.configuration_manager.apply_system_override(
             {'rename-command': [old_name, new_name]})
+
+    def get_renamed_commands(self):
+        commands = self.configuration_manager.get_value("rename-command")
+        return [command for command in commands if command[0] != 'CONFIG']
+
+    def rename_commands(self, commands):
+        """
+        :param commands: [['command1','new command1'],
+                           ['command2','new command2']...]
+        :return:
+        """
+        old_commands = \
+            self.configuration_manager.get_value("rename-command")
+        for i in range(len(commands)):
+            command, new_command = commands[i]
+            if new_command is None:
+                commands[i][1] = utils.generate_random_password()
+            if command.upper() == 'CONFIG':
+                raise exception.ConfigurationNotSupported(
+                    "CONFIG command disabled by default")
+            if command.upper() not in ALLOW_DISABLED_COMMANDS:
+                raise exception.ConfigurationNotSupported(
+                    "Rename-command %s is not allowed" % command)
+        for command, renamed_command in old_commands:
+            if command.upper() == 'CONFIG':
+                commands.append([command, renamed_command])
+        self.configuration_manager.apply_system_override(
+            {'rename-command': commands})
 
     def get_logfile(self):
         """Specify the log file name. Also the empty string can be used to
@@ -431,6 +727,8 @@ class RedisApp(object):
                 change_id=SYS_OVERRIDES_AUTH)
             self.apply_overrides(
                 self.admin, {'requirepass': password, 'masterauth': password})
+            kwargs = {'enable_auth': "true", 'passwd': password}
+            self.upload_redis_sentinel_config(**kwargs)
         except exception.TroveError:
             LOG.exception('Error enabling authentication for instance.')
             raise
@@ -442,9 +740,133 @@ class RedisApp(object):
                 change_id=SYS_OVERRIDES_AUTH)
             self.apply_overrides(self.admin,
                                  {'requirepass': '', 'masterauth': ''})
+            kwargs = {'enable_auth': "false"}
+            self.upload_redis_sentinel_config(**kwargs)
         except exception.TroveError:
             LOG.exception('Error disabling authentication for instance.')
             raise
+
+    @property
+    def sentinel_configration_manager(self):
+        if self._sentinel_configration_manager is None:
+            revision_dir = guestagent_utils.build_file_path(
+                os.path.dirname(system.REDIS_CONFIG), "sentinel_overrides")
+            config_value_mappings = {'yes': True, 'no': False, "''": None}
+            self._sentinel_configration_manager = ConfigurationManager(
+                system.SENTINEL_CONFIG,
+                system.REDIS_OWNER, system.REDIS_OWNER,
+                PropertiesCodec(
+                    unpack_singletons=False,
+                    string_mappings=config_value_mappings
+                ), requires_root=True,
+                override_strategy=OneFileOverrideStrategy(revision_dir))
+        return self._sentinel_configration_manager
+
+    @staticmethod
+    def get_sync_ha_lock():
+        return operating_system.lock('sync_ha', lock_file_prefix='trove')
+
+    def get_ha(self, other_keys=[]):
+        enabled = operating_system.custom_config_ini_get('enabled')
+        if str(operating_system.custom_config_ini_get(
+                'enabled')) == 'True':
+            LOG.debug("enabled:%s %s", enabled, type(enabled))
+            keys = ['enabled', 'vip', 'quorum',
+                    'sentinel_enabled', 'number_of_nodes'] + other_keys
+            keys_map = {'enabled': bool,
+                        'sentinel_enabled': bool,
+                        'quorum': int,
+                        'number_of_nodes': int}
+            return {key: keys_map.get(key, str)(
+                operating_system.custom_config_ini_get(key)) for key in keys}
+        else:
+            return {'enabled': False}
+
+    def set_ha(self, ha_config):
+        config = {
+            'enabled': True,
+            'vip': None,
+            'master': None,
+            'mangled': None,
+            'quorum': 1,
+            'port': 6379,
+            'passwd': "",
+            'enable_auth': "false",
+            'sentinel_enabled': True,
+            'number_of_nodes': 1
+        }
+        LOG.debug("set_ha with configuration: %s", ha_config)
+        config.update(ha_config)
+        config["mangled"] = self.get_config_command_name()
+        old_vip = operating_system.custom_config_ini_get(key='vip')
+        vip = ha_config.get('vip', 'None')
+        config['host'] = self._redis_host_ip(
+            device='eth0', vip=vip)
+        port = self.get_port()
+        config['port'] = port
+        password = self.get_configuration_property('requirepass')
+        passwd_opt = ""
+        if password:
+            config['enable_auth'] = "true"
+            config['passwd'] = password
+            passwd_opt = "-a %s" % password
+        if 'master' not in ha_config:
+            master = os.popen(
+                "redis-cli %s info Replication | grep master_host |"
+                " awk -F: '{print $2}'" % passwd_opt).read().strip()
+            config['master'] = master if master else config['host']
+        operating_system.custom_config_ini_set(config)
+        try:
+            replication_info = self.admin.get_info("Replication")
+            devs = netifaces.gateways()[netifaces.AF_INET]
+            dev = list(devs[0])[1]
+            LOG.debug("GOT replication info: %s", replication_info)
+            LOG.debug("GOT devs: %s", devs)
+            if old_vip and old_vip != vip:
+                LOG.debug("GOT old_vip: %s, vip: %s", old_vip, vip)
+                operating_system.remove_vip(vip, dev)
+            if replication_info.get('role') == 'master':
+                operating_system.add_vip(vip, dev)
+        except exception.ProcessExecutionError as e:
+            LOG.debug("GOT EORRR: %s", e)
+        self.upload_redis_sentinel_config(**config)
+
+    def delete_ha(self):
+        config = {
+            'enabled': False,
+            'vip': None,
+            'master': None,
+            'mangled': None,
+            'quorum': 1,
+            'port': 6379,
+            'sentinel_enabled': False,
+            'number_of_nodes': 1
+        }
+        LOG.debug("delete_ha")
+        service_candidates = ['redis-sentinel']
+        if 'type' in operating_system.service_discovery(service_candidates):
+            operating_system.stop_service(service_candidates)
+            operating_system.disable_service_on_boot(service_candidates)
+        else:
+            LOG.warn("Not found service %s", service_candidates)
+        devs = netifaces.gateways()[netifaces.AF_INET]
+        vip = operating_system.custom_config_ini_get(key='vip')
+        dev = list(devs[0])[1]
+        operating_system.custom_config_ini_set(config)
+        try:
+            operating_system.remove_vip(vip, dev)
+        except BaseException as e:
+            LOG.debug("GOT ERROR: %s", e)
+
+    def sentinel_command(self, command):
+        cmd = "redis-cli -p 26379"
+        passwd = operating_system.custom_config_ini_get(key='passwd')
+        if passwd:
+            cmd = cmd + " -a " + passwd
+        cmd = cmd + " " + command
+        ret = os.popen(cmd).read()
+        LOG.debug("exec cmd: %s \noutput: %s", cmd, ret)
+        return ret
 
 
 class RedisAdmin(object):
@@ -454,8 +876,7 @@ class RedisAdmin(object):
     DEFAULT_CONFIG_CMD = 'CONFIG'
 
     def __init__(self, password=None, unix_socket_path=None, config_cmd=None):
-        self.__client = redis.StrictRedis(
-            password=password, unix_socket_path=unix_socket_path)
+        self.__client = redis.StrictRedis(password=password)
         self.__config_cmd_name = config_cmd or self.DEFAULT_CONFIG_CMD
 
     def set_config_command_name(self, name):
@@ -467,6 +888,11 @@ class RedisAdmin(object):
         """Ping the Redis server and return True if a response is received.
         """
         return self.__client.ping()
+
+    def info(self, section=None):
+        """Get the Redis server info and return results if a response is received.
+        """
+        return self.__client.info(section=section)
 
     def get_info(self, section=None):
         return self.__client.info(section=section)
@@ -507,6 +933,7 @@ class RedisAdmin(object):
         LOG.debug("Redis data persist (%s) completed", save_cmd)
 
     def set_master(self, host=None, port=None):
+        LOG.debug("SLAVEOF %s %s" % (host, port))
         self.__client.slaveof(host, port)
 
     def config_set(self, name, value):

@@ -116,7 +116,9 @@ class FakeSwiftConnection(object):
             if name.startswith("bad_manifest_etag_"):
                 return {'etag': '"this_is_an_intentional_bad_manifest_etag"'}
         else:
-            if name in self.container_objects:
+            if name.startswith("bad_manifest_etag_"):
+                return {'etag': 'fake-md5-sum'}
+            elif name in self.container_objects:
                 checksum.update(self.container_objects[name])
             else:
                 return {'etag': 'fake-md5-sum'}

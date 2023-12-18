@@ -1,6 +1,7 @@
 {
     "databases": [
         {
+            "character_set": "utf8",
             "name": "anotherdb"
         }
     ],

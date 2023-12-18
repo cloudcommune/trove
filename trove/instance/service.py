@@ -142,10 +142,12 @@ class InstanceController(wsgi.Controller):
         context.notification = notification.DBaaSInstanceResizeVolume(
             context, request=req)
         self.authorize_instance_action(context, 'resize_volume', instance)
-
+        qos_specs = volume.get('qos_specs', None)
+        LOG.debug("resize %s volume with new size %s, and new qos_specs: %s",
+                  instance.id, volume['size'], qos_specs)
         with StartNotification(context, instance_id=instance.id,
                                new_size=volume['size']):
-            instance.resize_volume(volume['size'])
+            instance.resize_volume(volume['size'], qos_specs=qos_specs)
         return wsgi.Result(None, 202)
 
     def _action_resize_flavor(self, context, req, instance, flavorRef):
@@ -346,9 +348,14 @@ class InstanceController(wsgi.Controller):
             volume_info = body['instance']['volume']
             volume_size = int(volume_info['size'])
             volume_type = volume_info.get('type')
+            qos_specs = volume_info.get('qos_specs')
         else:
             volume_size = None
             volume_type = None
+            qos_specs = None
+        kw = {}
+        if qos_specs:
+            kw = {'qos_specs': qos_specs}
 
         if 'restorePoint' in body['instance']:
             backupRef = body['instance']['restorePoint']['backupRef']
@@ -397,7 +404,8 @@ class InstanceController(wsgi.Controller):
                                           modules=modules,
                                           locality=locality,
                                           region_name=region_name,
-                                          access=access)
+                                          access=access,
+                                          **kw)
 
         view = views.InstanceDetailView(instance, req=req)
         return wsgi.Result(view.data(), 200)

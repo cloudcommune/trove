@@ -266,13 +266,15 @@ class StreamReaderTests(trove_testtools.TestCase):
                                        password='password')
         self.stream = StreamReader(self.runner,
                                    self.runner.manifest,
+                                   'database_backups',
                                    max_file_size=100)
 
     def test_base_filename(self):
         self.assertEqual('123', self.stream.base_filename)
 
     def test_base_filename_no_extension(self):
-        stream_reader = StreamReader(self.runner, 'foo')
+        stream_reader = StreamReader(self.runner, 'foo',
+                                     'database_backups', max_file_size=100)
         self.assertEqual('foo', stream_reader.base_filename)
 
     def test_segment(self):

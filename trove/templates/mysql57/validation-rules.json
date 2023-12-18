@@ -1,0 +1,254 @@
+{
+    "configuration-parameters": [
+        {
+            "name": "back_log",
+            "restart_required": true,
+            "max": 65535,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "binlog_cache_size",
+            "restart_required": false,
+            "max": 16777216,
+            "min": 4096,
+            "type": "integer"
+        },
+        {
+            "name": "binlog_row_image",
+            "restart_required": false,
+            "type": "string"
+        },
+        {
+            "name": "bulk_insert_buffer_size",
+            "restart_required": false,
+            "max": 34359738368,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "character_set_server",
+            "restart_required": true,
+            "type": "string"
+        },
+        {
+            "name": "explicit_defaults_for_timestamp",
+            "restart_required": false,
+            "type": "boolean"
+        },
+        {
+            "name": "innodb_buffer_pool_size",
+            "restart_required": false,
+            "max": 34359738368,
+            "min": 268435456,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_flush_log_at_trx_commit",
+            "restart_required": false,
+            "max": 2,
+            "min": 0,
+            "type": "string"
+        },
+        {
+            "name": "innodb_io_capacity",
+            "restart_required": false,
+            "max": 18446744073709551615,
+            "min": 100,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_thread_concurrency",
+            "restart_required": false,
+            "max": 128,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_lock_wait_timeout",
+            "restart_required": false,
+            "max": 1073741824,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_print_all_deadlocks",
+            "restart_required": false,
+            "type": "boolean"
+        },
+        {
+            "name": "innodb_purge_threads",
+            "restart_required": true,
+            "max": 32,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_read_io_threads",
+            "restart_required": true,
+            "max": 64,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_thread_concurrency",
+            "restart_required": false,
+            "max": 128,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_thread_sleep_delay",
+            "restart_required": false,
+            "max": 1000000,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "innodb_write_io_threads",
+            "restart_required": true,
+            "max": 64,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "interactive_timeout",
+            "restart_required": false,
+            "max": 31536000,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "keep_files_on_create",
+            "restart_required": false,
+            "type": "boolean"
+        },
+        {
+            "name": "key_buffer_size",
+            "restart_required": false,
+            "max": 34359738368,
+            "min": 8,
+            "type": "integer"
+        },
+        {
+            "name": "log_queries_not_using_indexes",
+            "restart_required": false,
+            "type": "boolean"
+        },
+        {
+            "name": "log_throttle_queries_not_using_indexes",
+            "restart_required": false,
+            "max": 4294967295,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "long_query_time",
+            "restart_required": false,
+            "max": 3600,
+            "min": 0,
+            "type": "float"
+        },
+        {
+            "name": "max_allowed_packet",
+            "restart_required": false,
+            "max": 1073741824,
+            "min": 1024,
+            "type": "integer"
+        },
+        {
+            "name": "max_connect_errors",
+            "restart_required": false,
+            "max": 18446744073709551615,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "max_connections",
+            "restart_required": false,
+            "max": 100000,
+            "min": 1,
+            "type": "integer"
+        },
+        {
+            "name": "max_heap_table_size",
+            "restart_required": false,
+            "max": 34359738368,
+            "min": 16384,
+            "type": "integer"
+        },
+        {
+            "name": "query_cache_size",
+            "restart_required": false,
+            "max": 34359738368,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "query_cache_type",
+            "restart_required": true,
+            "type": "string"
+        },
+        {
+            "name": "read_buffer_size",
+            "restart_required": false,
+            "max": 2147479552,
+            "min": 8192,
+            "type": "integer"
+        },
+        {
+            "name": "read_rnd_buffer_size",
+            "restart_required": false,
+            "max": 2147483647,
+            "min": 4096,
+            "type": "integer"
+        },
+        {
+            "name": "rpl_semi_sync_master_enabled",
+            "restart_required": false,
+            "max": 1,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "rpl_semi_sync_slave_enabled",
+            "restart_required": false,
+            "max": 1,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "skip_name_resolve",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "sort_buffer_size",
+            "restart_required": false,
+            "max": 34359738368,
+            "min": 32768,
+            "type": "integer"
+        },
+        {
+            "name": "sync_binlog",
+            "restart_required": false,
+            "max": 4294967295,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "tmp_table_size",
+            "restart_required": false,
+            "max": 67108864,
+            "min": 262144,
+            "type": "integer"
+        },
+        {
+            "name": "wait_timeout",
+            "restart_required": false,
+            "max": 31536000,
+            "min": 1,
+            "type": "integer"
+        }
+    ]
+}

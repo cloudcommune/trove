@@ -155,3 +155,31 @@ class Manager(periodic_task.PeriodicTasks):
         LOG.error("Guest exception on request %(req)s:\n%(exc)s",
                   {'req': notification.request_id, 'exc': exception})
         notification.notify_exc_info(message, exception)
+
+    def promote_replica_to_master_in_db(self, context, instance_id):
+        """Prometer a replica to master in database. This is called by
+        guestagent when have some ha module, after one replica has changed
+        in to master by ha system. Call this method to update into torve
+        """
+        LOG.info("Promote instance %s to master in database", instance_id)
+        instance = inst_models.DBInstance.find_by(id=instance_id)
+        old_master_id = instance.slave_of_id
+        tenant_id = instance.tenant_id
+        if old_master_id:
+            LOG.info("Promoting instance %s to master in database",
+                     instance_id)
+            old_master = inst_models.DBInstance.find_by(id=old_master_id,
+                                                        tenant_id=tenant_id,
+                                                        deleted=False)
+            old_slaves = inst_models.DBInstance.find_all(
+                slave_of_id=old_master_id, tenant_id=tenant_id, deleted=False)
+            old_master.slave_of_id = instance_id
+            old_master.save()
+            for slave in old_slaves:
+                if slave.id == instance_id:
+                    slave.slave_of_id = None
+                else:
+                    slave.slave_of_id = instance_id
+                slave.save()
+        else:
+            LOG.info("Instance %s is a master already.", instance_id)

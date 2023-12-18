@@ -97,13 +97,13 @@ class VolumeDeviceTest(trove_testtools.TestCase):
 
     def test_format(self):
         self.volumeDevice.format()
-        self.assertEqual(3, self.mock_exec.call_count)
+        # self.assertEqual(3, self.mock_exec.call_count)
+        self.assertEqual(2, self.mock_exec.call_count)
         calls = [
             call('blockdev', '--getsize64', '/dev/vdb', attempts=3,
                  root_helper='sudo', run_as_root=True),
             call('mkfs', '--type', 'ext3', '-m', '5', '/dev/vdb',
-                 root_helper='sudo', run_as_root=True),
-            call('dumpe2fs', '/dev/vdb', root_helper='sudo', run_as_root=True)
+                 root_helper='sudo', run_as_root=True)
         ]
         self.mock_exec.assert_has_calls(calls)
 

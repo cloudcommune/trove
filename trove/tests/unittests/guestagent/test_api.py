@@ -466,6 +466,24 @@ class ApiTest(trove_testtools.TestCase):
             'upgrade', instance_version=instance_version,
             location=location, metadata=None)
 
+    def test_get_renamed_commands(self):
+        renamed_commands = [
+            ["shutdown", "renamed_shutdown"],
+            ["eval", "renamed_eval"]]
+        self.call_context.call.return_value = renamed_commands
+        resp = self.api.get_renamed_commands()
+        self._verify_rpc_prepare_before_call()
+        self._verify_call('get_renamed_commands')
+        self.assertThat(resp, Is(renamed_commands))
+
+    def test_rename_commands(self):
+        renamed_commands = [
+            ["shutdown", "renamed_shutdown"],
+            ["eval", "renamed_eval"]]
+        self.api.rename_commands(renamed_commands)
+        self._verify_rpc_prepare_before_call()
+        self._verify_call('rename_commands', commands=renamed_commands)
+
     def _verify_rpc_prepare_before_call(self):
         self.api.client.prepare.assert_called_once_with(
             version=RPC_API_VERSION, timeout=mock.ANY)

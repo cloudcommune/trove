@@ -261,3 +261,27 @@ class TestConfigurationsParameterController(trove_testtools.TestCase):
                                                           action='create',
                                                           is_valid=False))
         self.assertIn("'yes' is not of type 'integer'", error_messages)
+
+    def test_validate_create_configuration_param_list(self):
+        body = {
+            'configuration-parameter': {
+                'name': 'test',
+                'restart_required': 'yes',
+                'data_type': 'list'
+            }
+        }
+        self._test_validate_configuration_with_action(body,
+                                                      action='create',
+                                                      is_valid=False)
+
+    def test_validate_create_configuration_param_dict(self):
+        body = {
+            'configuration-parameter': {
+                'name': 'test',
+                'restart_required': 'yes',
+                'data_type': 'dict'
+            }
+        }
+        self._test_validate_configuration_with_action(body,
+                                                      action='create',
+                                                      is_valid=False)

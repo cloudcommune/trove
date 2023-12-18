@@ -17,6 +17,7 @@
 from oslo_log import log as logging
 from oslo_utils import netutils
 
+from trove.guestagent.common import operating_system
 from trove.guestagent.strategies.replication import base
 
 LOG = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class RedisSyncReplication(base.Replication):
             'host': netutils.get_my_ipv4(),
             'port': service.get_port(),
             'requirepass': service.get_auth_password(),
+            'ha': service.get_ha()
         }
         return master_ref
 
@@ -47,9 +49,19 @@ class RedisSyncReplication(base.Replication):
                                  location, snapshot_info):
         return None, None
 
+    @operating_system.synchronized('enable_as_master')
     def enable_as_master(self, service, master_config):
         service.configuration_manager.apply_system_override(
             master_config, change_id=self.CONF_LABEL_REPLICATION_MASTER)
+        ha = service.get_ha()
+        if ha.get('enabled'):
+            if ha['number_of_nodes'] == 1 and not ha.get('sentinel_enabled'):
+                ha['sentinel_enabled'] = True
+            ha['number_of_nodes'] += 1
+            _quorum = 1 if ha['number_of_nodes'] <= 2 else \
+                ha['number_of_nodes'] / 2 + 1
+            ha['quorum'] = _quorum
+            service.set_ha(ha)
         service.restart()
 
     def enable_as_slave(self, service, snapshot, slave_config):
@@ -61,13 +73,15 @@ class RedisSyncReplication(base.Replication):
         connect_options = {'slaveof': [master_host, master_port]}
         master_passwd = master_info.get('requirepass')
         if master_passwd:
+            connect_options['requirepass'] = master_passwd
             connect_options['masterauth'] = master_passwd
-            service.admin.config_set('masterauth', master_passwd)
+            service.enable_root(master_passwd)
         else:
             service.admin.config_set('masterauth', "")
         service.configuration_manager.apply_system_override(
             connect_options, change_id=self.CONF_LABEL_REPLICATION_SLAVE)
         service.admin.set_master(host=master_host, port=master_port)
+        service.set_ha(master_info.get('ha', {'enabled': False}))
         LOG.debug('Enabled as slave.')
 
     def detach_slave(self, service, for_failover):
@@ -75,11 +89,21 @@ class RedisSyncReplication(base.Replication):
             change_id=self.CONF_LABEL_REPLICATION_SLAVE)
         service.admin.set_master(host=None, port=None)
         service.admin.config_set('masterauth', "")
+        service.delete_ha()
+        service.stop_db()
         return None
 
     def cleanup_source_on_replica_detach(self, service, replica_info):
         # Nothing needs to be done to the master when a replica goes away.
-        pass
+        ha = service.get_ha()
+        if ha.get('enabled'):
+            ha['number_of_nodes'] -= 1
+            if ha['number_of_nodes'] == 1 and ha.get('sentinel_enabled'):
+                ha['sentinel_enabled'] = False
+            _quorum = 1 if ha['number_of_nodes'] <= 2 else \
+                ha['number_of_nodes'] / 2 + 1
+            ha['quorum'] = _quorum
+            service.set_ha(ha)
 
     def get_replica_context(self, service):
         return {
@@ -89,3 +113,13 @@ class RedisSyncReplication(base.Replication):
     def demote_master(self, service):
         service.configuration_manager.remove_system_override(
             change_id=self.CONF_LABEL_REPLICATION_MASTER)
+
+    def get_sync_info(self, service, info_type):
+        if info_type == 'detach':
+            service.sentinel_command("sentinel reset '*'")
+        return service.get_ha()
+
+    def sync_from_master_info(self, service, info_type, info):
+        if info_type == 'detach':
+            service.sentinel_command("sentinel reset '*'")
+        return service.set_ha(info)
