@@ -142,7 +142,8 @@ class BaseDbStatus(object):
         raise NotImplementedError()
 
     def _get_actual_db_custom_status(self):
-        pass
+        status = {"is_notify": False}
+        return status
 
     @property
     def is_installed(self):

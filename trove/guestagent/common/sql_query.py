@@ -160,14 +160,6 @@ class Grant(object):
         return self.user or ""
 
     @property
-    def _identity(self):
-        if self.clear:
-            return "IDENTIFIED BY '%s'" % self.clear
-        if self.hashed:
-            return "IDENTIFIED BY PASSWORD '%s'" % self.hashed
-        return ""
-
-    @property
     def _host(self):
         return self.host or "%"
 
@@ -187,12 +179,7 @@ class Grant(object):
 
     @property
     def _whom(self):
-        # User and host to be granted permission. Optionally, password, too.
-        whom = [("TO %s" % self._user_host),
-                self._identity,
-                ]
-        whom = [w for w in whom if w]
-        return " ".join(whom)
+        return "TO %s" % self._user_host
 
     @property
     def _with(self):
@@ -257,11 +244,7 @@ class Revoke(Grant):
     def _whom(self):
         # User and host from whom to revoke permission.
         # Optionally, password, too.
-        whom = [("FROM %s" % self._user_host),
-                self._identity,
-                ]
-        whom = [w for w in whom if w]
-        return " ".join(whom)
+        return "FROM %s" % self._user_host
 
 
 class CreateDatabase(object):
@@ -381,8 +364,9 @@ class SetPassword(object):
         properties = {'user_name': self.user,
                       'user_host': self.host,
                       'new_password': self.new_password}
-        return ("SET PASSWORD FOR '%(user_name)s'@'%(user_host)s' = "
-                "PASSWORD('%(new_password)s');" % properties)
+        return ("ALTER USER '%(user_name)s'@'%(user_host)s' "
+                "IDENTIFIED WITH mysql_native_password "
+                "BY '%(new_password)s';" % properties)
 
 
 class DropUser(object):

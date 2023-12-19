@@ -729,10 +729,9 @@ class BaseMySqlApp(object):
 
     def secure(self, config_contents):
         LOG.debug("Securing MySQL now.")
-        clear_expired_password()
 
-        LOG.debug("Generating admin password.")
         admin_password = utils.generate_random_password()
+
         engine = sqlalchemy.create_engine(
             CONNECTION_STR_FORMAT % ('root', ''), echo=True)
         with self.local_sql_client(engine, use_flush=False) as client:
@@ -985,8 +984,13 @@ class BaseMySqlApp(object):
     def _wait_for_slave_status(self, status, client, max_time):
 
         def verify_slave_status():
-            actual_status = client.execute(
-                "SHOW GLOBAL STATUS like 'slave_running'").first()[1]
+            ret = client.execute(
+                "SELECT SERVICE_STATE FROM "
+                "performance_schema.replication_connection_status").first()
+            if not ret:
+                actual_status = 'OFF'
+            else:
+                actual_status = ret[0]
             return actual_status.upper() == status.upper()
 
         LOG.debug("Waiting for SLAVE_RUNNING to change to %s.", status)
